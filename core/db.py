@@ -493,9 +493,54 @@ def minimum_brand_discount():
 
 def list_monitored_items():
     with _conn() as conn:
-        return [dict(r) for r in conn.execute(
+        items = [dict(r) for r in conn.execute(
             "SELECT * FROM monitored_items ORDER BY active DESC, name"
         )]
+        for item in items:
+            # Price trend: compare last 7d avg vs previous 7d avg
+            recent = conn.execute(
+                "SELECT AVG(price) avg_price FROM price_observations "
+                "WHERE monitored_item_id=? AND observed_at >= datetime('now','-7 days')",
+                (item["id"],)).fetchone()
+            older = conn.execute(
+                "SELECT AVG(price) avg_price FROM price_observations "
+                "WHERE monitored_item_id=? AND observed_at >= datetime('now','-14 days') "
+                "AND observed_at < datetime('now','-7 days')",
+                (item["id"],)).fetchone()
+            avg_90d = conn.execute(
+                "SELECT AVG(price) avg_price FROM price_observations "
+                "WHERE monitored_item_id=? AND observed_at >= datetime('now','-90 days')",
+                (item["id"],)).fetchone()
+            best_store = conn.execute(
+                "SELECT store, MIN(price) min_price FROM price_observations "
+                "WHERE monitored_item_id=? AND observed_at >= datetime('now','-7 days') "
+                "GROUP BY store ORDER BY min_price LIMIT 1",
+                (item["id"],)).fetchone()
+            r_avg = float(recent["avg_price"]) if recent and recent["avg_price"] else None
+            o_avg = float(older["avg_price"]) if older and older["avg_price"] else None
+            a_avg = float(avg_90d["avg_price"]) if avg_90d and avg_90d["avg_price"] else None
+            # Trend
+            if r_avg and o_avg:
+                pct = (r_avg - o_avg) / o_avg * 100
+                if pct < -5:
+                    item["trend"] = "down"
+                    item["trend_pct"] = round(pct, 1)
+                elif pct > 5:
+                    item["trend"] = "up"
+                    item["trend_pct"] = round(pct, 1)
+                else:
+                    item["trend"] = "stable"
+                    item["trend_pct"] = round(pct, 1)
+            else:
+                item["trend"] = None
+                item["trend_pct"] = None
+            # Opportunity: last price < 90% of 90d average
+            lp = float(item["last_seen_price"]) if item.get("last_seen_price") else None
+            item["is_opportunity"] = bool(lp and a_avg and lp < a_avg * 0.9)
+            item["avg_90d"] = round(a_avg, 2) if a_avg else None
+            # Best store right now
+            item["best_store"] = dict(best_store) if best_store else None
+        return items
 
 
 def save_monitored_item(data, item_id=None):
