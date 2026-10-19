@@ -648,6 +648,12 @@ def list_price_alerts(active_only=True):
             "SELECT * FROM price_alerts ORDER BY triggered, created_at DESC")]
 
 
+def update_price_alert_target(alert_id, new_target):
+    with _conn() as conn:
+        conn.execute("UPDATE price_alerts SET target_price=?, triggered=0, triggered_at=NULL WHERE id=?",
+                     (float(new_target), alert_id))
+
+
 def delete_price_alert(alert_id):
     with _conn() as conn:
         conn.execute("DELETE FROM price_alerts WHERE id=?", (alert_id,))

@@ -311,6 +311,21 @@ def price_alerts_page():
                            alerts=db.list_price_alerts(active_only=False))
 
 
+@app.post("/price-alerts/<int:alert_id>/edit")
+@login_required
+def price_alert_edit(alert_id):
+    try:
+        new_target = float(request.form.get("target_price", 0))
+        if new_target <= 0:
+            flash("Preço inválido", "error")
+        else:
+            db.update_price_alert_target(alert_id, new_target)
+            flash("Preço-alvo atualizado para R$ %.2f" % new_target, "success")
+    except (ValueError, TypeError):
+        flash("Preço inválido", "error")
+    return redirect(url_for("price_alerts_page"))
+
+
 @app.post("/price-alerts/<int:alert_id>/delete")
 @login_required
 def price_alert_delete(alert_id):

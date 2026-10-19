@@ -12,4 +12,56 @@ function updateBulkCount(){const n=cards().filter(c=>c.querySelector('.item-chec
 document.addEventListener('change',e=>{if(e.target.classList.contains('item-check')||e.target.id==='select-all')updateBulkCount()});
 // Suggest blacklist on reject
 document.addEventListener('click',async e=>{const btn=e.target.closest('[data-action="reject"]');if(!btn)return;const card=btn.closest('.approval-card');if(!card)return;setTimeout(()=>{const title=card.querySelector('h3')?.textContent||'';const words=title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').match(/[a-z0-9]+/g)||[];const stop=new Set(['de','do','da','dos','das','com','para','por','uma','um','hot','wheels','miniatura','carro','escala','mattel','edicao','premium']);const unique=[...new Set(words.filter(w=>w.length>3&&!stop.has(w)))].slice(0,5);if(unique.length>0&&confirm('Deseja bloquear algum termo deste produto?\\n\\nTermos: '+unique.join(', ')+'\\n\\nClique OK para escolher.')){const term=prompt('Qual termo bloquear?\\nSugestões: '+unique.join(', '));if(term&&term.trim()){fetch('/api/blacklist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'term',value:term.trim(),label:'Sugerido ao rejeitar: '+title.slice(0,40)})}).then(r=>{if(r.ok&&window.toast)toast('Termo "'+term.trim()+'" adicionado à blacklist')})}}},300)});
+// Mobile swipe to approve/reject
+if('ontouchstart' in window)(function(){
+  const THRESHOLD=80;
+  document.querySelectorAll('.approval-card').forEach(card=>{
+    // Wrap content for sliding
+    const inner=document.createElement('div');
+    inner.className='swipe-inner';
+    while(card.firstChild)inner.appendChild(card.firstChild);
+    card.innerHTML='<div class="swipe-hint swipe-approve">Aprovar</div><div class="swipe-hint swipe-reject">Rejeitar</div>';
+    card.appendChild(inner);
+    card.classList.add('swipe-card');
+    inner.style.background='inherit';
+
+    let startX=0,currentX=0,dragging=false;
+    inner.addEventListener('touchstart',e=>{
+      startX=e.touches[0].clientX;currentX=0;dragging=true;
+      inner.style.transition='none';
+    },{passive:true});
+    inner.addEventListener('touchmove',e=>{
+      if(!dragging)return;
+      currentX=e.touches[0].clientX-startX;
+      // Dampen the movement
+      const dx=currentX*0.5;
+      inner.style.transform='translateX('+dx+'px)';
+      card.classList.toggle('swiping-right',dx>30);
+      card.classList.toggle('swiping-left',dx<-30);
+    },{passive:true});
+    inner.addEventListener('touchend',()=>{
+      dragging=false;
+      inner.style.transition='transform .2s';
+      const dx=currentX*0.5;
+      if(dx>THRESHOLD){
+        // Approve
+        inner.style.transform='translateX(100%)';
+        setTimeout(()=>{
+          const btn=card.querySelector('[data-action="approve"]');
+          if(btn)btn.click();
+        },200);
+      }else if(dx<-THRESHOLD){
+        // Reject
+        inner.style.transform='translateX(-100%)';
+        setTimeout(()=>{
+          const btn=card.querySelector('[data-action="reject"]');
+          if(btn)btn.click();
+        },200);
+      }else{
+        inner.style.transform='translateX(0)';
+        card.classList.remove('swiping-right','swiping-left');
+      }
+    });
+  });
+})();
 })();
