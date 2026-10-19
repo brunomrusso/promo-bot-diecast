@@ -1,0 +1,15 @@
+[Unit]
+Description=Promo Bot Carros (Telegram deals)
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/promo-bot-carros
+ExecStart=/usr/bin/xvfb-run -a /home/ubuntu/promo-bot-carros/venv/bin/python main.py
+Restart=always
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

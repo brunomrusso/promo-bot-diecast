@@ -1,0 +1,15 @@
+[Unit]
+Description=Diecast Control Web Panel
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/promo-bot-carros
+ExecStart=/home/ubuntu/promo-bot-carros/venv/bin/gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8080 dashboard:app
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/ubuntu/promo-bot-carros/.env
+
+[Install]
+WantedBy=multi-user.target

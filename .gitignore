@@ -1,0 +1,13 @@
+.env
+deals.db
+deals.db-journal
+chrome_profile_ml/
+venv/
+__pycache__/
+backups/
+*.pyc
+.DS_Store
+Thumbs.db
+test_amz.py
+test_amz2.py
+ml_debug.png

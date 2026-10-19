@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Alertas de preço · RUSSO Diecast{% endblock %}
+{% block heading %}Alertas de preço{% endblock %}
+{% block content %}
+<section class="panel">
+<p>Produtos marcados como "Caro" na Central de Aprovações. O bot os trará de volta quando o preço atingir o valor desejado.</p>
+</section>
+{% if alerts %}
+<section class="approval-grid">
+{% for alert in alerts %}
+<article class="panel alert-card {{ 'alert-triggered' if alert.triggered else '' }}">
+<div class="alert-top">{% if alert.image %}<img class="alert-img" src="{{ alert.image }}" alt="{{ alert.title }}" loading="lazy">{% endif %}<div class="alert-info"><div class="deal-badges"><span class="pill">{{ alert.store }}</span>{% if alert.triggered %}<span class="quality-badge quality-record">Atingiu o alvo!</span>{% else %}<span class="quality-badge quality-expensive">Aguardando</span>{% endif %}</div><h3>{{ alert.title }}</h3></div></div>
+<div class="alert-prices"><div><small>Preço marcado</small><strong>R$ {{ '%.2f'|format(alert.current_price) }}</strong></div><div><small>Alvo</small><strong class="alert-target-price">R$ {{ '%.2f'|format(alert.target_price) }}</strong></div></div>
+<div class="alert-footer"><span data-time="{{ alert.created_at }}">{{ alert.created_at[:16] }}</span>{% if alert.triggered_at %}<span data-time="{{ alert.triggered_at }}">{{ alert.triggered_at[:16] }}</span>{% endif %}<form method="post" action="{{ url_for('price_alert_delete', alert_id=alert.id) }}"><button class="button mini-btn mini-btn-danger" onclick="return confirm('Remover este alerta?')">Remover</button></form></div>
+</article>
+{% endfor %}
+</section>
+{% else %}
+<div class="panel empty-state"><strong>Nenhum alerta ativo</strong><p>Marque produtos como "Caro" na Central de Aprovações para criar alertas de preço.</p></div>
+{% endif %}
+{% endblock %}

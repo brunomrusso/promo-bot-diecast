@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}Minis monitoradas · RUSSO Diecast{% endblock %}
+{% block heading %}Minis monitoradas{% endblock %}
+{% block content %}
+<section class="split">
+  <form class="panel form-grid" method="post">
+    <input type="hidden" name="observed_price" value="{{ request.args.get('observed_price', '') }}"><input type="hidden" name="product_id" value="{{ request.args.get('product_id', '') }}"><input type="hidden" name="store" value="{{ request.args.get('store', '') }}"><input type="hidden" name="source_url" value="{{ request.args.get('url', '') }}"><input type="hidden" name="image" value="{{ request.args.get('image', '') }}">
+    <div class="wide"><small>NOVO MONITORAMENTO</small><h2>Cadastrar mini desejada</h2><p>O bot registra os preços encontrados e publica automaticamente quando estiver dentro do limite.</p></div>
+    <label class="wide">Nome para identificação<input name="name" value="{{ request.args.get('name', '') }}" placeholder="Mini GT Nissan Skyline R34" required></label>
+    <label class="wide">Termo usado na busca<input name="search_terms" value="{{ request.args.get('search_terms', '') }}" placeholder="mini gt skyline r34" required></label>
+    <label class="wide">Termos obrigatórios, separados por vírgula<input name="required_terms" value="{{ request.args.get('required_terms', '') }}" placeholder="mini gt, skyline, r34" required></label>
+    <label>Preço máximo (R$)<input name="max_price" value="{{ request.args.get('max_price', '') }}" type="number" min="0" step="0.01" required></label>
+    <label class="check"><input name="active" type="checkbox" checked> Ativo</label>
+    <button class="primary wide" type="submit">Salvar monitoramento</button>
+  </form>
+  <section class="panel"><small>DICIONÁRIO</small><h2>{{ items|length }} minis cadastradas</h2><div class="cards">
+    {% for item in items %}
+    <article class="mini-card mini-card-v2">
+      <div class="mini-left">{% if item.image %}<img class="mini-thumb" src="{{ item.image }}" alt="{{ item.name }}" loading="lazy">{% endif %}<div class="mini-text"><span class="pill {{ 'posted' if item.active else 'rejected' }}">{{ 'Ativa' if item.active else 'Pausada' }}</span><h3>{{ item.name }}</h3><p>Busca: <strong>{{ item.search_terms }}</strong></p><p>Exige: {{ item.required_terms }}</p>{% if item.last_seen_price %}<p>Último preço: <strong>R$ {{ '%.2f'|format(item.last_seen_price) }}</strong></p>{% endif %}</div></div>
+      <div class="mini-right"><strong class="target">≤ R$ {{ '%.2f'|format(item.max_price) }}</strong><div class="mini-btns"><a class="primary mini-btn" href="{{ url_for('monitored_detail', item_id=item.id, scan=1) }}">Pesquisar</a><a class="button mini-btn" href="{{ url_for('monitored_detail', item_id=item.id) }}">Histórico</a></div><div class="mini-btns"><details class="mini-edit-wrap"><summary class="button mini-btn">Editar</summary><form class="edit-mini" method="post"><input type="hidden" name="id" value="{{ item.id }}"><label>Nome<input name="name" value="{{ item.name }}" required></label><label>Busca<input name="search_terms" value="{{ item.search_terms }}" required></label><label>Termos obrigatórios<input name="required_terms" value="{{ item.required_terms }}" required></label><label>Preço máximo<input name="max_price" type="number" step="0.01" value="{{ item.max_price }}" required></label><label class="check"><input name="active" type="checkbox" {{ 'checked' if item.active }}> Ativo</label><button class="primary">Salvar</button></form></details><form method="post" action="{{ url_for('monitored_delete', item_id=item.id) }}" class="delete-form"><button class="button mini-btn mini-btn-danger" type="submit" onclick="return confirm('Excluir esta mini?')">Excluir</button></form></div></div>
+    </article>
+    {% else %}<p class="empty">Cadastre a primeira mini ao lado.</p>{% endfor %}
+  </div></section>
+</section>
+{% endblock %}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Promo Bot secure local backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/promo-bot-carros
+ExecStart=/home/ubuntu/promo-bot-carros/venv/bin/python backup.py
+Nice=10
+IOSchedulingClass=idle
