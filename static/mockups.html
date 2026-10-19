@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mockups - RUSSO Diecast</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* Paleta real do projeto */
+:root{--bg:#080d17;--surface:#101827;--surface2:#172337;--line:#263a55;--text:#f3f8ff;--muted:#8ca1bb;--accent:#25cce0;--accent-dark:#20559a;--red:#ef5350;--green:#39d98a}
+*{box-sizing:border-box;margin:0}
+body{background:#050a12;color:var(--text);font-family:'DM Sans',sans-serif}
+.mockups{display:flex;flex-direction:column;gap:60px;padding:30px;max-width:1400px;margin:auto}
+.mockup-title{text-align:center;font-family:'Space Grotesk';font-size:26px;color:var(--accent);margin-bottom:6px}
+.mockup-desc{text-align:center;color:var(--muted);font-size:13px;margin-bottom:20px;max-width:600px;margin-left:auto;margin-right:auto}
+.frame{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--bg);position:relative}
+.frame-desktop{width:100%;max-width:1100px;margin:auto;height:500px}
+.frame-mobile{width:375px;margin:auto;height:680px}
+.label{position:absolute;top:-12px;left:20px;background:var(--accent);color:#000;font-size:10px;font-weight:700;padding:2px 10px;border-radius:6px;z-index:10;font-family:'Montserrat'}
+
+/* Fake content */
+.fake-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+.fake-stat{background:linear-gradient(145deg,var(--surface),#101318);border:1px solid var(--line);border-radius:14px;padding:16px}
+.fake-stat span{color:var(--muted);font-size:11px;font-family:'Montserrat';font-weight:600;letter-spacing:.5px}
+.fake-stat strong{display:block;font-family:'Space Grotesk';font-size:24px;margin-top:4px}
+.fake-stat small{color:var(--muted);font-size:10px}
+.fake-panel{background:linear-gradient(145deg,var(--surface),#101318);border:1px solid var(--line);border-radius:14px;padding:18px;min-height:140px}
+.fake-panel h2{font-size:15px;font-family:'Space Grotesk';margin-bottom:12px}
+.fake-bar{height:8px;background:var(--surface2);border-radius:4px;margin-bottom:8px}
+.fake-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-dark));border-radius:4px}
+.divider{border:none;border-top:1px dashed var(--line);margin:40px 0}
+
+/* Emblema pequeno (roda) - usado em todos */
+.emblem{width:32px;height:32px;object-fit:contain;filter:drop-shadow(0 0 6px rgba(218,165,32,.3))}
+.emblem-wrap{position:relative;flex-shrink:0}
+.emblem-wrap i{width:8px;height:8px;background:var(--green);border-radius:50%;position:absolute;bottom:0;right:-1px;border:2px solid var(--bg);box-shadow:0 0 8px var(--green)}
+
+/* ====== MOCKUP A: Top nav horizontal ====== */
+.a-layout{display:flex;flex-direction:column;height:100%}
+.a-topnav{display:flex;align-items:center;gap:0;background:#0a1220;border-bottom:1px solid var(--line);padding:0 20px;height:50px;overflow-x:auto;flex-shrink:0}
+.a-topnav a{padding:14px 14px;color:var(--muted);text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap;border-bottom:2px solid transparent;transition:.15s;font-family:'DM Sans'}
+.a-topnav a.active{color:var(--accent);border-bottom-color:var(--accent)}
+.a-topnav a:hover{color:var(--text)}
+.a-topnav .a-badge{background:var(--red);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px}
+.a-topnav .a-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.a-header{padding:22px 28px 14px;display:flex;align-items:center;justify-content:space-between}
+.a-header h1{font-family:'Space Grotesk';font-size:22px}
+.a-body{padding:0 28px 28px;flex:1;overflow:auto}
+
+/* ====== MOCKUP B: Bottom tab bar ====== */
+.b-layout{display:flex;flex-direction:column;height:100%}
+.b-header{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:var(--bg)}
+.b-header h1{font-family:'Space Grotesk';font-size:18px;font-weight:700}
+.b-body{flex:1;overflow:auto;padding:18px}
+.b-bottombar{display:flex;justify-content:space-around;align-items:center;background:#0a1220;border-top:1px solid var(--line);padding:6px 0 10px;flex-shrink:0}
+.b-tab{display:flex;flex-direction:column;align-items:center;gap:2px;text-decoration:none;color:var(--muted);font-size:10px;font-weight:600;position:relative;padding:4px 10px;font-family:'DM Sans'}
+.b-tab.active{color:var(--accent)}
+.b-tab svg{width:20px;height:20px}
+.b-tab .b-tbadge{position:absolute;top:-2px;right:2px;background:var(--red);color:#fff;font-size:8px;padding:1px 4px;border-radius:6px;min-width:14px;text-align:center}
+.b-more-menu{background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px}
+.b-more-item{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 6px;border-radius:10px;text-decoration:none;color:var(--muted);font-size:10px;font-weight:500;font-family:'DM Sans'}
+
+/* ====== MOCKUP C: Icon sidebar ====== */
+.c-layout{display:flex;height:100%}
+.c-sidebar{width:60px;background:#0a1220;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:2px;flex-shrink:0}
+.c-sidebar .c-logo{margin-bottom:14px}
+.c-sidebar .c-logo img{width:36px;height:36px;border-radius:8px;object-fit:contain}
+.c-sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:10px;color:var(--muted);text-decoration:none;position:relative;transition:.15s}
+.c-sidebar a:hover{background:var(--surface2);color:var(--text)}
+.c-sidebar a.active{background:var(--surface2);color:var(--accent)}
+.c-sidebar a .c-badge{position:absolute;top:3px;right:1px;background:var(--red);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.c-sidebar a[data-tip]:hover::after{content:attr(data-tip);position:absolute;left:52px;top:50%;transform:translateY(-50%);background:var(--surface2);color:var(--text);padding:5px 10px;border-radius:7px;font-size:11px;white-space:nowrap;border:1px solid var(--line);z-index:20;font-family:'DM Sans'}
+.c-sidebar .c-spacer{flex:1}
+.c-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.c-header{padding:22px 28px 14px;display:flex;align-items:center;gap:14px}
+.c-header h1{font-family:'Space Grotesk';font-size:22px}
+.c-body{padding:0 28px 28px;flex:1;overflow:auto}
+</style>
+</head>
+<body>
+<div class="mockups">
+
+<!-- ============ MOCKUP A ============ -->
+<div>
+<h2 class="mockup-title">A: Navegacao horizontal superior</h2>
+<p class="mockup-desc">Menu em abas no topo. Sem sidebar. Header limpo: so titulo da pagina + emblema pequeno com status. Mais espaco para conteudo.</p>
+
+<div class="frame frame-desktop" style="margin-bottom:20px">
+<span class="label">DESKTOP</span>
+<div class="a-layout">
+  <div class="a-topnav">
+    <a class="active">Visao geral</a>
+    <a>Criar anuncio</a>
+    <a>Aprovacoes<span class="a-badge">5</span></a>
+    <a>Alertas</a>
+    <a>Agenda</a>
+    <a>Minis</a>
+    <a>Blacklist</a>
+    <a>Regras</a>
+    <a>Buscas</a>
+    <a>Metricas</a>
+    <a>Saude</a>
+    <div class="a-right">
+      <div class="emblem-wrap"><img class="emblem" src="emblema.png" alt=""><i></i></div>
+    </div>
+  </div>
+  <div class="a-header"><h1>Visao geral</h1></div>
+  <div class="a-body">
+    <div class="fake-stats">
+      <div class="fake-stat"><span>PUBLICADOS</span><strong>12</strong><small>historico total</small></div>
+      <div class="fake-stat"><span>AGUARDANDO</span><strong>5</strong><small>aprovacao</small></div>
+      <div class="fake-stat"><span>MONITORADAS</span><strong>8</strong><small>minis ativas</small></div>
+    </div>
+    <div class="fake-panel"><h2>Ultimos anuncios</h2><div class="fake-bar"><i style="width:70%"></i></div><div class="fake-bar"><i style="width:45%"></i></div><div class="fake-bar"><i style="width:90%"></i></div></div>
+  </div>
+</div>
+</div>
+
+<div class="frame frame-mobile">
+<span class="label">MOBILE</span>
+<div class="a-layout">
+  <div class="a-topnav" style="padding:0 12px">
+    <a class="active" style="font-size:11px;padding:12px 10px">Geral</a>
+    <a style="font-size:11px;padding:12px 10px">Criar</a>
+    <a style="font-size:11px;padding:12px 10px">Aprovar<span class="a-badge">5</span></a>
+    <a style="font-size:11px;padding:12px 10px">Agenda</a>
+    <a style="font-size:11px;padding:12px 10px">Minis</a>
+    <a style="font-size:11px;padding:12px 10px">Mais</a>
+    <div class="a-right">
+      <div class="emblem-wrap"><img class="emblem" src="emblema.png" alt="" style="width:26px;height:26px"><i style="width:6px;height:6px"></i></div>
+    </div>
+  </div>
+  <div class="a-header" style="padding:16px 16px 10px"><h1 style="font-size:20px">Visao geral</h1></div>
+  <div class="a-body" style="padding:0 16px 16px">
+    <div class="fake-stats" style="grid-template-columns:repeat(2,1fr)">
+      <div class="fake-stat" style="padding:12px"><span style="font-size:10px">PUBLICADOS</span><strong style="font-size:20px">12</strong></div>
+      <div class="fake-stat" style="padding:12px"><span style="font-size:10px">AGUARDANDO</span><strong style="font-size:20px">5</strong></div>
+    </div>
+    <div class="fake-panel"><h2 style="font-size:14px">Ultimos anuncios</h2><div class="fake-bar"><i style="width:70%"></i></div><div class="fake-bar"><i style="width:45%"></i></div></div>
+  </div>
+</div>
+</div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ MOCKUP B ============ -->
+<div>
+<h2 class="mockup-title">B: Barra inferior estilo app</h2>
+<p class="mockup-desc">Header minimalista: so titulo da pagina + emblema. Navegacao toda na barra inferior com icones. Botao "Mais" expande grid de opcoes extras. Sem texto repetitivo.</p>
+
+<div class="frame frame-mobile" style="margin-bottom:20px">
+<span class="label">MOBILE</span>
+<div class="b-layout">
+  <div class="b-header">
+    <h1>Aprovacoes</h1>
+    <div class="emblem-wrap"><img class="emblem" src="emblema.png" alt=""><i></i></div>
+  </div>
+  <div class="b-body">
+    <div class="fake-stats" style="grid-template-columns:repeat(2,1fr)">
+      <div class="fake-stat" style="padding:12px"><span style="font-size:10px">AGUARDANDO</span><strong style="font-size:22px">5</strong></div>
+      <div class="fake-stat" style="padding:12px"><span style="font-size:10px">SCORE MEDIO</span><strong style="font-size:22px">72</strong></div>
+    </div>
+    <div class="fake-panel"><h2 style="font-size:14px">Hot Wheels Premium BMW M3</h2><div style="display:flex;gap:8px;margin-top:12px"><div style="background:var(--green);color:#000;padding:8px 16px;border-radius:8px;font-weight:700;font-size:12px;flex:1;text-align:center;font-family:'DM Sans'">Aprovar</div><div style="background:var(--surface2);color:var(--muted);padding:8px 16px;border-radius:8px;font-weight:600;font-size:12px;flex:1;text-align:center;font-family:'DM Sans'">Rejeitar</div></div></div>
+    <div style="height:14px"></div>
+    <div class="b-more-menu">
+      <a class="b-more-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>Minis</a>
+      <a class="b-more-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M4.93 4.93l14.14 14.14"/></svg>Blacklist</a>
+      <a class="b-more-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h10M4 17h6"/></svg>Regras</a>
+      <a class="b-more-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Buscas</a>
+      <a class="b-more-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>Metricas</a>
+      <a class="b-more-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Saude</a>
+    </div>
+  </div>
+  <div class="b-bottombar">
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Inicio</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Criar</a>
+    <a class="b-tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg><span class="b-tbadge">5</span>Aprovar</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>Agenda</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>Mais</a>
+  </div>
+</div>
+</div>
+
+<div class="frame frame-desktop">
+<span class="label">DESKTOP</span>
+<div class="b-layout">
+  <div class="b-header" style="padding:14px 28px">
+    <h1 style="font-size:22px">Visao geral</h1>
+    <div class="emblem-wrap"><img class="emblem" src="emblema.png" alt=""><i></i></div>
+  </div>
+  <div class="b-body" style="padding:20px 28px">
+    <div class="fake-stats">
+      <div class="fake-stat"><span>PUBLICADOS</span><strong>12</strong><small>historico total</small></div>
+      <div class="fake-stat"><span>AGUARDANDO</span><strong>5</strong><small>aprovacao</small></div>
+      <div class="fake-stat"><span>MONITORADAS</span><strong>8</strong><small>minis ativas</small></div>
+    </div>
+    <div class="fake-panel"><h2>Ultimos anuncios</h2><div class="fake-bar"><i style="width:70%"></i></div><div class="fake-bar"><i style="width:45%"></i></div><div class="fake-bar"><i style="width:90%"></i></div><div class="fake-bar"><i style="width:35%"></i></div></div>
+  </div>
+  <div class="b-bottombar">
+    <a class="b-tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Inicio</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Criar</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg><span class="b-tbadge">5</span>Aprovar</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/></svg>Alertas</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4"/></svg>Agenda</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>Minis</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>Metricas</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>Mais</a>
+  </div>
+</div>
+</div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ MOCKUP C ============ -->
+<div>
+<h2 class="mockup-title">C: Sidebar compacta de icones</h2>
+<p class="mockup-desc">Sidebar fina (60px) so com icones. Tooltip no hover. Header: so titulo da pagina. Emblema na base da sidebar. Mobile converte para bottom bar.</p>
+
+<div class="frame frame-desktop" style="margin-bottom:20px">
+<span class="label">DESKTOP</span>
+<div class="c-layout">
+  <div class="c-sidebar">
+    <div class="c-logo"><img src="novo-logo.jpeg" alt=""></div>
+    <a class="active" data-tip="Visao geral"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></a>
+    <a data-tip="Criar anuncio"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></a>
+    <a data-tip="Aprovacoes"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg><span class="c-badge">5</span></a>
+    <a data-tip="Alertas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg></a>
+    <a data-tip="Agenda"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></a>
+    <a data-tip="Minis"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg></a>
+    <a data-tip="Blacklist"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M4.93 4.93l14.14 14.14"/></svg></a>
+    <a data-tip="Regras"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h10M4 17h6"/></svg></a>
+    <a data-tip="Buscas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></a>
+    <a data-tip="Metricas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg></a>
+    <a data-tip="Saude"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></a>
+    <div class="c-spacer"></div>
+    <div class="emblem-wrap" style="margin-bottom:6px"><img class="emblem" src="emblema.png" alt="" style="width:30px;height:30px"><i style="width:7px;height:7px"></i></div>
+    <a data-tip="Sair"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg></a>
+  </div>
+  <div class="c-main">
+    <div class="c-header"><h1>Visao geral</h1></div>
+    <div class="c-body">
+      <div class="fake-stats">
+        <div class="fake-stat"><span>PUBLICADOS</span><strong>12</strong><small>historico total</small></div>
+        <div class="fake-stat"><span>AGUARDANDO</span><strong>5</strong><small>aprovacao</small></div>
+        <div class="fake-stat"><span>MONITORADAS</span><strong>8</strong><small>minis ativas</small></div>
+      </div>
+      <div class="fake-panel"><h2>Ultimos anuncios</h2><div class="fake-bar"><i style="width:70%"></i></div><div class="fake-bar"><i style="width:45%"></i></div><div class="fake-bar"><i style="width:90%"></i></div><div class="fake-bar"><i style="width:55%"></i></div></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="frame frame-mobile">
+<span class="label">MOBILE (bottom bar)</span>
+<div class="b-layout">
+  <div class="b-header">
+    <h1>Visao geral</h1>
+    <div class="emblem-wrap"><img class="emblem" src="emblema.png" alt="" style="width:28px;height:28px"><i style="width:7px;height:7px"></i></div>
+  </div>
+  <div class="b-body">
+    <div class="fake-stats" style="grid-template-columns:repeat(2,1fr)">
+      <div class="fake-stat" style="padding:12px"><span style="font-size:10px">PUBLICADOS</span><strong style="font-size:20px">12</strong></div>
+      <div class="fake-stat" style="padding:12px"><span style="font-size:10px">AGUARDANDO</span><strong style="font-size:20px">5</strong></div>
+    </div>
+    <div class="fake-panel"><h2 style="font-size:14px">Ultimos anuncios</h2><div class="fake-bar"><i style="width:70%"></i></div><div class="fake-bar"><i style="width:45%"></i></div></div>
+  </div>
+  <div class="b-bottombar">
+    <a class="b-tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Inicio</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Criar</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg><span class="b-tbadge">5</span>Aprovar</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4"/></svg>Agenda</a>
+    <a class="b-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>Mais</a>
+  </div>
+</div>
+</div>
+</div>
+
+<hr class="divider">
+<div style="text-align:center;padding:20px;color:var(--muted);font-family:'DM Sans'">
+  <p style="font-size:13px"><strong style="color:var(--accent)">A</strong> = Abas horizontais no topo &nbsp;&nbsp; <strong style="color:var(--accent)">B</strong> = Barra inferior estilo app &nbsp;&nbsp; <strong style="color:var(--accent)">C</strong> = Sidebar icones + bottom bar mobile</p>
+  <p style="font-size:12px;margin-top:6px">Todos: sem "RUSSO" repetido, sem "PAINEL ADMINISTRATIVO", so titulo da pagina + emblema reduzido com bolinha de status</p>
+</div>
+
+</div>
+</body>
+</html>

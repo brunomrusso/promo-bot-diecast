@@ -1,12 +1,11 @@
 import hmac
 import os
-import time
 from datetime import datetime, timezone
 from functools import wraps
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
 import config
 from core import backup, db, health
@@ -102,28 +101,15 @@ def index():
     return render_template("index.html", stats=stats, history=history)
 
 
-@app.get("/api/events")
+@app.get("/api/pending-count")
 @login_required
-def sse_events():
-    """Server-Sent Events: push pending count updates to dashboard."""
-    def stream():
-        last_count = -1
-        while True:
-            try:
-                with db._conn() as conn:
-                    pending = conn.execute(
-                        "SELECT COUNT(*) FROM posted WHERE status='pending'"
-                    ).fetchone()[0]
-                if pending != last_count:
-                    last_count = pending
-                    yield f"data: {jsonify(pending=pending).get_data(as_text=True)}\n\n"
-                time.sleep(10)
-            except GeneratorExit:
-                break
-            except Exception:
-                time.sleep(30)
-    return Response(stream(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+def pending_count_api():
+    """Lightweight polling endpoint for real-time badge updates."""
+    with db._conn() as conn:
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM posted WHERE status='pending'"
+        ).fetchone()[0]
+    return jsonify(pending=pending)
 
 
 @app.get("/go/<product_id>")
