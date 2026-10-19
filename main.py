@@ -5,14 +5,10 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import affiliate
-import approvals
 import config
-import db
-import filters
-import manual_jobs
-from affiliate import to_affiliate_url
-from notifier import send_deal, send_for_approval, send_price_alert
+from core import affiliate, approvals, db, filters, manual_jobs
+from core.affiliate import to_affiliate_url
+from core.notifier import send_deal, send_for_approval, send_price_alert
 from scrapers import close_browser, get_scrapers
 from scrapers.coupons import search_coupons
 from scrapers.ml_coupons import collect_ml_coupons, ml_available

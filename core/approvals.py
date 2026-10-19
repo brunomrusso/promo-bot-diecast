@@ -1,7 +1,7 @@
 import requests
 
 import config
-import db
+from core import db
 
 API = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
 _offset = 0

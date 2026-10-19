@@ -7,10 +7,8 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
-import backup
 import config
-import db
-import health
+from core import backup, db, health
 
 app = Flask(__name__)
 app.secret_key = os.getenv("PANEL_SECRET_KEY", "change-this-key")

@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import db
+from core import db
 from playwright.sync_api import sync_playwright
 
 PROFILE_DIR = Path(__file__).parent.parent / "chrome_profile_ml"

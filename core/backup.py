@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-import db
+from core import db
 
 ROOT = Path(__file__).parent
 BACKUP_DIR = ROOT / "backups"

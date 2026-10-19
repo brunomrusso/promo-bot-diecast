@@ -1,5 +1,5 @@
 import config
-import db
+from core import db
 
 
 def is_relevant(title: str) -> bool:

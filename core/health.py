@@ -4,8 +4,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-import backup
-import db
+from core import backup, db
 
 ROOT = Path(__file__).parent
 

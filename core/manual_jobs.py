@@ -7,10 +7,9 @@ from zoneinfo import ZoneInfo
 
 import requests as http_requests
 
-import db
-import filters
-from affiliate import is_monetized, to_affiliate_url
-from notifier import format_whatsapp, send_deal, send_whatsapp_ready
+from core import db, filters
+from core.affiliate import is_monetized, to_affiliate_url
+from core.notifier import format_whatsapp, send_deal, send_whatsapp_ready
 from scrapers import get_scrapers
 from scrapers.ml_coupons import _get_context, mark_ml_ready, mark_ml_verification
 
