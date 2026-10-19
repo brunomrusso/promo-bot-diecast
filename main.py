@@ -113,16 +113,39 @@ def _check_deals():
                     lego_count += 1
                 link = to_affiliate_url(deal)
                 monetized = affiliate.is_monetized(link, store_name)
+                # Calculate relevance score
+                score_data = filters.relevance_score(deal, brand_rule)
+                deal["_score"] = score_data["score"]
+                deal["_score_reasons"] = "; ".join(score_data["reasons"])
                 if watched:
                     needs_approval = False
                 elif brand_rule and brand_rule["approval_mode"] == "manual":
                     needs_approval = True
                 elif brand_rule and brand_rule["approval_mode"] == "auto":
                     needs_approval = False
+                elif score_data["auto_action"] == "approve" and monetized:
+                    needs_approval = False
+                    print(f"[★] score {score_data['score']}: auto-aprovado: {deal['title'][:50]}")
+                elif score_data["auto_action"] == "reject":
+                    db.mark_posted(deal["id"], store_name,
+                                   deal["title"], deal["price"],
+                                   status="rejected", url=deal["url"],
+                                   image=deal.get("image", ""),
+                                   original_price=deal["original_price"],
+                                   discount=deal["discount"],
+                                   brand_rule_id=brand_rule["id"] if brand_rule else None,
+                                   brand_name=brand_rule["name"] if brand_rule else "",
+                                   relevance_score=score_data["score"],
+                                   score_reasons=deal["_score_reasons"])
+                    print(f"[✗] score {score_data['score']}: auto-rejeitado: {deal['title'][:50]}")
+                    continue
                 elif brand_rule:
                     needs_approval = deal["discount"] < brand_rule["auto_approve_discount"]
                 else:
                     needs_approval = deal["discount"] < config.AUTO_APPROVE_MIN
+                _score_args = dict(
+                    relevance_score=deal.get("_score"),
+                    score_reasons=deal.get("_score_reasons", ""))
                 if (config.TELEGRAM_ADMIN_CHAT_ID
                         and (needs_approval or not monetized)):
                     quiet = _is_quiet()
@@ -134,11 +157,12 @@ def _check_deals():
                                    original_price=deal["original_price"],
                                    discount=deal["discount"],
                                    brand_rule_id=brand_rule["id"] if brand_rule else None,
-                                   brand_name=brand_rule["name"] if brand_rule else "")
+                                   brand_name=brand_rule["name"] if brand_rule else "",
+                                   **_score_args)
                     if quiet:
                         print(f"[z] silêncio, enfileirado: {deal['title'][:60]}")
                     else:
-                        print(f"[?] aprovação: {deal['title'][:60]}")
+                        print(f"[?] aprovação (score {deal.get('_score','-')}): {deal['title'][:60]}")
                     continue
                 quiet = _is_quiet()
                 if quiet:
@@ -149,7 +173,8 @@ def _check_deals():
                                    original_price=deal["original_price"],
                                    discount=deal["discount"],
                                    brand_rule_id=brand_rule["id"] if brand_rule else None,
-                                   brand_name=brand_rule["name"] if brand_rule else "")
+                                   brand_name=brand_rule["name"] if brand_rule else "",
+                                   **_score_args)
                     print(f"[z] silêncio, enfileirado auto: {deal['title'][:60]}")
                     continue
                 if send_deal(deal, link):
@@ -159,7 +184,8 @@ def _check_deals():
                                    original_price=deal["original_price"],
                                    discount=deal["discount"],
                                    brand_rule_id=brand_rule["id"] if brand_rule else None,
-                                   brand_name=brand_rule["name"] if brand_rule else "")
+                                   brand_name=brand_rule["name"] if brand_rule else "",
+                                   **_score_args)
                     db.record_publication_details(deal["id"], deal, link)
                     print(f"[+] {deal['store']}: {deal['title'][:60]} "
                           f"({deal['discount']}% off)")

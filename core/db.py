@@ -25,7 +25,8 @@ def _conn():
                      ("brand_rule_id", "INTEGER"), ("brand_name", "TEXT"),
                      ("coupon_code", "TEXT"), ("coupon_type", "TEXT"),
                      ("coupon_value", "REAL"), ("coupon_final_price", "REAL"),
-                     ("coupon_savings", "REAL"), ("affiliate_url", "TEXT")]: 
+                     ("coupon_savings", "REAL"), ("affiliate_url", "TEXT"),
+                     ("relevance_score", "INTEGER"), ("score_reasons", "TEXT")]: 
         if col not in cols:
             conn.execute(f"ALTER TABLE posted ADD COLUMN {col} {typ}")
     brand_rules_new = conn.execute(
@@ -206,15 +207,18 @@ def should_repost(product_id: str, current_price: float,
 def mark_posted(product_id: str, store: str, title: str, price: float,
                 status: str = "posted", url: str = "", image: str = "",
                 original_price: float = 0, discount: int = 0,
-                brand_rule_id=None, brand_name=""):
+                brand_rule_id=None, brand_name="",
+                relevance_score=None, score_reasons=""):
     with _conn() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO posted "
             "(product_id, store, title, price, status, url, image, "
-            "original_price, discount, brand_rule_id, brand_name) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "original_price, discount, brand_rule_id, brand_name, "
+            "relevance_score, score_reasons) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (product_id, store, title, price, status, url, image,
-             original_price, discount, brand_rule_id, brand_name),
+             original_price, discount, brand_rule_id, brand_name,
+             relevance_score, score_reasons),
         )
 
 
@@ -270,6 +274,8 @@ def list_pending(store="", search="", sort="discount_desc"):
         "price_asc": "price ASC, posted_at DESC",
         "newest": "posted_at DESC",
         "oldest": "posted_at ASC",
+        "score_desc": "COALESCE(relevance_score,50) DESC, posted_at DESC",
+        "score_asc": "COALESCE(relevance_score,50) ASC, posted_at DESC",
     }.get(sort, "discount DESC, posted_at DESC")
     clauses = ["status='pending'"]
     params = []
@@ -400,8 +406,16 @@ def metrics_summary(days=30):
             "SELECT COUNT(*) uses,COALESCE(SUM(coupon_savings),0) savings "
             "FROM posted WHERE status='posted' AND coupon_code!='' "
             "AND posted_at>=datetime('now',?)", (period,)).fetchone())
+        score_dist = [dict(r) for r in conn.execute(
+            "SELECT CASE WHEN relevance_score>=75 THEN 'alto' "
+            "WHEN relevance_score>=50 THEN 'medio' "
+            "WHEN relevance_score IS NOT NULL THEN 'baixo' "
+            "ELSE 'sem_score' END as faixa, COUNT(*) as total, "
+            "SUM(status='posted') as posted, SUM(status='rejected') as rejected "
+            "FROM posted WHERE posted_at>=datetime('now',?) GROUP BY faixa", (period,))]
     return {"totals": totals, "daily": daily, "stores": stores, "brands": brands,
-            "coupons": coupons, "coupon_totals": coupon_totals, "days": days}
+            "coupons": coupons, "coupon_totals": coupon_totals, "days": days,
+            "score_dist": score_dist}
 
 
 def list_brand_rules():

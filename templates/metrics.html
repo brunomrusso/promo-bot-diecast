@@ -1,1 +1,56 @@
-{% extends 'base.html' %}{% block title %}Métricas · RUSSO Diecast{% endblock %}{% block heading %}Métricas do canal{% endblock %}{% block content %}<div class="metric-period"><a href="?days=7">7 dias</a><a href="?days=30">30 dias</a><a href="?days=90">90 dias</a></div><section class="stats"><article><span>Publicados</span><strong>{{ metrics.totals.posted or 0 }}</strong><small>últimos {{ metrics.days }} dias</small></article><article><span>Pendentes</span><strong>{{ metrics.totals.pending or 0 }}</strong><small>aguardando decisão</small></article><article><span>Rejeitados</span><strong>{{ metrics.totals.rejected or 0 }}</strong><small>pela curadoria</small></article><article><span>Desconto médio</span><strong>{{ '%.1f%%'|format(metrics.totals.avg_discount or 0) }}</strong><small>ofertas publicadas</small></article></section><section class="history-grid"><div class="panel"><small>POR LOJA</small><h2>Desempenho das fontes</h2><table><thead><tr><th>Loja</th><th>Encontradas</th><th>Publicadas</th><th>Desconto</th></tr></thead><tbody>{% for row in metrics.stores %}<tr><td>{{ row.store }}</td><td>{{ row.total }}</td><td>{{ row.posted }}</td><td>{{ '%.1f%%'|format(row.avg_discount or 0) }}</td></tr>{% endfor %}</tbody></table></div><div class="panel"><small>POR CATEGORIA</small><h2>Marcas publicadas</h2><table><thead><tr><th>Categoria</th><th>Encontradas</th><th>Publicadas</th></tr></thead><tbody>{% for row in metrics.brands %}<tr><td>{{ row.brand }}</td><td>{{ row.total }}</td><td>{{ row.posted }}</td></tr>{% endfor %}</tbody></table></div></section><section class="panel"><small>CUPONS CONFIRMADOS</small><h2>{{ metrics.coupon_totals.uses }} usos · R$ {{ '%.2f'|format(metrics.coupon_totals.savings) }} de economia adicional</h2><div class="table-wrap"><table><thead><tr><th>Cupom</th><th>Usos</th><th>Economia</th><th>Preço final médio</th></tr></thead><tbody>{% for row in metrics.coupons %}<tr><td><code>{{ row.coupon_code }}</code></td><td>{{ row.uses }}</td><td>R$ {{ '%.2f'|format(row.savings) }}</td><td>R$ {{ '%.2f'|format(row.avg_final) }}</td></tr>{% else %}<tr><td colspan="4" class="empty">Os próximos anúncios com cupom começarão este histórico.</td></tr>{% endfor %}</tbody></table></div></section><section class="panel"><small>EVOLUÇÃO DIÁRIA</small><h2>Atividade</h2><div class="metric-bars">{% for row in metrics.daily %}<div title="{{ row.day }}: {{ row.posted }} publicadas"><i style="height:{{ [row.posted * 8, 8]|max }}px"></i><span>{{ row.day[5:] }}</span></div>{% endfor %}</div></section>{% if clicks and clicks.total > 0 %}<section class="history-grid"><div class="panel"><small>RASTREAMENTO</small><h2>Cliques nos links ({{ clicks.total }} total)</h2><table><thead><tr><th>Loja</th><th>Cliques</th></tr></thead><tbody>{% for row in clicks.by_store %}<tr><td>{{ row.store }}</td><td>{{ row.clicks }}</td></tr>{% endfor %}</tbody></table></div><div class="panel"><small>MAIS CLICADOS</small><h2>Top 10 produtos</h2><table><thead><tr><th>Produto</th><th>Loja</th><th>Cliques</th></tr></thead><tbody>{% for row in clicks.top %}<tr><td>{{ row.title[:50] }}</td><td>{{ row.store }}</td><td>{{ row.clicks }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}{% endblock %}
+{% extends 'base.html' %}{% block title %}Métricas · RUSSO Diecast{% endblock %}{% block heading %}Métricas do canal{% endblock %}{% block content %}
+<div class="metric-period"><a href="?days=7">7 dias</a><a href="?days=30">30 dias</a><a href="?days=90">90 dias</a></div>
+<section class="stats"><article><span>Publicados</span><strong>{{ metrics.totals.posted or 0 }}</strong><small>últimos {{ metrics.days }} dias</small></article><article><span>Pendentes</span><strong>{{ metrics.totals.pending or 0 }}</strong><small>aguardando decisão</small></article><article><span>Rejeitados</span><strong>{{ metrics.totals.rejected or 0 }}</strong><small>pela curadoria</small></article><article><span>Desconto médio</span><strong>{{ '%.1f%%'|format(metrics.totals.avg_discount or 0) }}</strong><small>ofertas publicadas</small></article></section>
+
+<section class="history-grid">
+<div class="panel"><small>PUBLICAÇÕES POR DIA</small><h2>Atividade recente</h2><div style="position:relative;height:220px"><canvas id="dailyChart"></canvas></div></div>
+<div class="panel"><small>POR LOJA</small><h2>Distribuição</h2><div style="position:relative;height:220px"><canvas id="storeChart"></canvas></div></div>
+</section>
+
+<section class="history-grid">
+<div class="panel"><small>POR LOJA</small><h2>Desempenho das fontes</h2><table><thead><tr><th>Loja</th><th>Encontradas</th><th>Publicadas</th><th>Desconto</th></tr></thead><tbody>{% for row in metrics.stores %}<tr><td>{{ row.store }}</td><td>{{ row.total }}</td><td>{{ row.posted }}</td><td>{{ '%.1f%%'|format(row.avg_discount or 0) }}</td></tr>{% endfor %}</tbody></table></div>
+<div class="panel"><small>POR CATEGORIA</small><h2>Marcas publicadas</h2><table><thead><tr><th>Categoria</th><th>Encontradas</th><th>Publicadas</th></tr></thead><tbody>{% for row in metrics.brands %}<tr><td>{{ row.brand }}</td><td>{{ row.total }}</td><td>{{ row.posted }}</td></tr>{% endfor %}</tbody></table></div>
+</section>
+
+<section class="panel"><small>CUPONS CONFIRMADOS</small><h2>{{ metrics.coupon_totals.uses }} usos · R$ {{ '%.2f'|format(metrics.coupon_totals.savings) }} de economia adicional</h2><div class="table-wrap"><table><thead><tr><th>Cupom</th><th>Usos</th><th>Economia</th><th>Preço final médio</th></tr></thead><tbody>{% for row in metrics.coupons %}<tr><td><code>{{ row.coupon_code }}</code></td><td>{{ row.uses }}</td><td>R$ {{ '%.2f'|format(row.savings) }}</td><td>R$ {{ '%.2f'|format(row.avg_final) }}</td></tr>{% endfor %}</tbody></table></div></section>
+
+<section class="panel"><small>PUBLICAÇÕES DIÁRIAS</small><div class="metric-bars">{% for row in metrics.daily %}<div title="{{ row.day }}: {{ row.posted }} publicadas"><i style="height:{{ [row.posted * 8, 8]|max }}px"></i><span>{{ row.day[5:] }}</span></div>{% endfor %}</div></section>
+
+{% if clicks and clicks.total > 0 %}<section class="history-grid"><div class="panel"><small>RASTREAMENTO</small><h2>Cliques nos links ({{ clicks.total }} total)</h2><table><thead><tr><th>Loja</th><th>Cliques</th></tr></thead><tbody>{% for row in clicks.by_store %}<tr><td>{{ row.store }}</td><td>{{ row.clicks }}</td></tr>{% endfor %}</tbody></table></div><div class="panel"><small>MAIS CLICADOS</small><h2>Top 10 produtos</h2><table><thead><tr><th>Produto</th><th>Loja</th><th>Cliques</th></tr></thead><tbody>{% for row in clicks.top %}<tr><td>{{ row.title[:50] }}</td><td>{{ row.store }}</td><td>{{ row.clicks }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+const colors = {accent:'#25cce0',green:'#39d98a',red:'#ef5350',muted:'#8ca1bb',surface:'#172337'};
+Chart.defaults.color = '#8ca1bb';
+Chart.defaults.borderColor = '#263a55';
+Chart.defaults.font.family = "'DM Sans',sans-serif";
+
+// Daily publications chart
+const dailyData = {{ metrics.daily|tojson }};
+new Chart(document.getElementById('dailyChart'),{
+  type:'bar',
+  data:{
+    labels:dailyData.map(d=>d.day.substring(5)),
+    datasets:[
+      {label:'Publicadas',data:dailyData.map(d=>d.posted||0),backgroundColor:colors.green+'88',borderRadius:4},
+      {label:'Total',data:dailyData.map(d=>d.total||0),backgroundColor:colors.accent+'44',borderRadius:4}
+    ]
+  },
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12}}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}},x:{grid:{display:false}}}}
+});
+
+// Store distribution pie chart
+const storeData = {{ metrics.stores|tojson }};
+const storeColors = ['#25cce0','#39d98a','#f7b731','#ef5350','#a855f7','#8ca1bb'];
+new Chart(document.getElementById('storeChart'),{
+  type:'doughnut',
+  data:{
+    labels:storeData.map(s=>s.store),
+    datasets:[{data:storeData.map(s=>s.posted||0),backgroundColor:storeColors.slice(0,storeData.length),borderWidth:0}]
+  },
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12}},tooltip:{callbacks:{label:function(ctx){return ctx.label+': '+ctx.raw+' publicadas'}}}}}
+});
+</script>
+{% endblock %}
