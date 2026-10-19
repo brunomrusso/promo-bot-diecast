@@ -55,7 +55,10 @@
   <main>
     <header class="topbar">
       <h1>{% block heading %}RUSSO Diecast{% endblock %}</h1>
-      <a class="emblem-link mobile-emblem" href="{{ url_for('index') }}"><img class="emblem" src="{{ url_for('static', filename='emblema.png') }}" alt="RUSSO Diecast"></a>
+      <div class="topbar-right">
+        <button class="theme-toggle mobile-theme" id="theme-toggle-mobile" aria-label="Alternar tema"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="theme-icon-mobile"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg></button>
+        <a class="emblem-link mobile-emblem" href="{{ url_for('index') }}"><img class="emblem" src="{{ url_for('static', filename='emblema.png') }}" alt="RUSSO Diecast"></a>
+      </div>
     </header>
     <div id="toast-container"></div>
     {% for category, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ category }} auto-dismiss">{{ message }}</div>{% endfor %}
@@ -67,21 +70,23 @@
   (function(){
     const saved=localStorage.getItem('theme');
     if(saved)document.documentElement.setAttribute('data-theme',saved);
-    const btn=document.getElementById('theme-toggle');
-    const icon=document.getElementById('theme-icon');
-    function updateIcon(){
+    const sunPath='<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>';
+    const moonPath='<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>';
+    function updateAllIcons(){
       const isLight=document.documentElement.getAttribute('data-theme')==='light';
-      icon.innerHTML=isLight
-        ?'<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>'
-        :'<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>';
+      document.querySelectorAll('#theme-icon,.theme-icon-mobile').forEach(icon=>{
+        icon.innerHTML=isLight?sunPath:moonPath;
+      });
     }
-    updateIcon();
-    if(btn)btn.addEventListener('click',function(){
+    updateAllIcons();
+    function toggle(){
       const current=document.documentElement.getAttribute('data-theme');
-      const next=current==='light'?'dark':'light';
-      if(next==='dark'){document.documentElement.removeAttribute('data-theme');localStorage.removeItem('theme')}
+      if(current==='light'){document.documentElement.removeAttribute('data-theme');localStorage.removeItem('theme')}
       else{document.documentElement.setAttribute('data-theme','light');localStorage.setItem('theme','light')}
-      updateIcon();
+      updateAllIcons();
+    }
+    document.querySelectorAll('#theme-toggle,#theme-toggle-mobile').forEach(btn=>{
+      if(btn)btn.addEventListener('click',toggle);
     });
   })();
   // Toast system
