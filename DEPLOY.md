@@ -36,35 +36,30 @@ mv ~/.env .
 bash deploy/setup.sh
 ```
 
-## 3. Login do Mercado Livre (1 vez, via VNC)
+## 3. Login do Mercado Livre (via VNC, assistente incluído)
 
 O perfil do Chrome do Windows **não** funciona no Linux (cookies são
 criptografados por SO) — precisa logar de novo, só uma vez.
 
-Na VM:
+**Caminho recomendado (Windows):** execute `deploy\abrir-login-ml.cmd`.
+Ele abre o túnel SSH, inicia `deploy/ml-login.sh` no servidor e conecta o
+TightVNC automaticamente. O script:
 
-```bash
-# terminal 1: inicia o display virtual + captura de cupons (abre o login)
-Xvfb :99 -screen 0 1280x800x24 &
-DISPLAY=:99 x11vnc -display :99 -nopw -listen 0.0.0.0 -once &
-```
+1. Marca `ml_maintenance` no estado do sistema e **para o bot**
+   (evita dois Chromes no mesmo perfil).
+2. Sobe Xvfb + x11vnc se necessário.
+3. Abre o Chrome com o perfil `chrome_profile_ml` para você logar.
+4. Ao encerrar (Ctrl+C no terminal do login), valida a sessão no
+   linkbuilder, marca `ready` e **religa o bot**.
 
-Do seu PC, crie um túnel SSH e conecte um cliente VNC (TightVNC/RealVNC):
+⚠️ **Importante:** encerre pelo terminal do login (Ctrl+C). Fechar só a
+janela do VNC deixa o processo órfão no servidor segurando o perfil —
+sintoma: erro "Playwright Sync API inside the asyncio loop" ou
+"profile is already in use" nas buscas.
 
-```bash
-ssh -i ~/Downloads/sua-chave.key -L 5900:localhost:5900 ubuntu@IP_DA_VM
-# cliente VNC → localhost:5900
-```
-
-Deixando o túnel aberto, em outro terminal na VM:
-
-```bash
-cd promo-bot-carros
-DISPLAY=:99 ./venv/bin/python -c "from scrapers.ml_coupons import collect_ml_coupons; collect_ml_coupons()"
-```
-
-A janela do Chrome aparece no VNC → faça login no ML → o script detecta
-e salva a sessão em `chrome_profile_ml/`.
+Para fazer manualmente, o equivalente é: parar `promobot`, subir
+Xvfb/x11vnc, abrir `scrapers.ml_coupons._get_context()` com `DISPLAY=:99`,
+logar, e ao final chamar a validação que existe no fim de `ml-login.sh`.
 
 ## 4. Teste e ative o serviço
 
@@ -87,3 +82,9 @@ journalctl -u promobot -f                       # acompanha os logs
 - **deals.db**: copie o arquivo se quiser preservar o histórico de posts
   já publicados; senão o bot começa limpo no servidor.
 - **Logs de erro**: `journalctl -u promobot` mostra tudo que acontece.
+
+## Mercado Livre bloqueado por IP (out/2026)
+
+- O ML bloqueia o range de IPs da Oracle (datacenter); trocar o IP efemero do VNIC **nao resolve** — qualquer IP `163.176.x.x` recebe a mesma verificacao (`account-verification`/`meli.la` 403).
+- Solucao: proxy residencial BR com sessao sticky. Configure `ML_PROXY_URL=http://user:pass@host:port` no `.env`; todo trafego do Chrome persistente do ML sai por ele.
+- O circuito `ml_session` continua ativo: bloqueio pausa as buscas do ML e avisa o admin no Telegram; demais lojas nao sao afetadas.

@@ -65,6 +65,28 @@ def _shorten(org_id: str, url: str) -> str:
     return url
 
 
+def coupon_status(code: str) -> str:
+    """Best-effort: confere o código no feed de cupons da Lomadee.
+    Retorna 'verified', 'not_found' ou 'unverifiable'."""
+    if not config.LOMADEE_APP_TOKEN:
+        return "unverifiable"
+    code = code.strip().upper()
+    try:
+        resp = requests.get(f"{BASE}/coupons", params={"limit": 200},
+                            headers=_headers(), timeout=15)
+        if resp.status_code != 200:
+            return "unverifiable"
+        data = resp.json().get("data") or []
+        for entry in data:
+            fields = " ".join(str(entry.get(k, ""))
+                              for k in ("code", "coupon", "name", "title", "description")).upper()
+            if code in fields:
+                return "verified"
+        return "not_found" if data else "unverifiable"
+    except (requests.RequestException, ValueError):
+        return "unverifiable"
+
+
 def search_lomadee(keyword: str, min_discount: int):
     """Produtos da Lomadee já com link de afiliado gerado via shortener."""
     if not config.LOMADEE_APP_TOKEN:
@@ -100,8 +122,6 @@ def search_lomadee(keyword: str, min_discount: int):
             round((1 - price / original) * 100)
             if original and original > price else 0
         )
-        if discount < min_discount:
-            continue
         seller = opt.get("seller") or _brand_name(p.get("organizationId", ""))
         images = p.get("images") or opt.get("images") or []
         aff_url = _shorten(p["organizationId"], url)

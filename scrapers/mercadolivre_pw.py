@@ -1,5 +1,6 @@
 import re
-from urllib.parse import quote
+from urllib.parse import quote, parse_qs, urlparse, urlencode, urlunparse
+from core import db, filters
 
 from .ml_coupons import (
     _get_context, is_ml_verification, mark_ml_ready, mark_ml_verification,
@@ -15,6 +16,48 @@ def _to_float(text: str):
         return None
 
 
+_origin_checks_remaining = 2
+
+
+def reset_comparison_budget():
+    global _origin_checks_remaining
+    _origin_checks_remaining = 2
+
+
+def _verify_market_origins(page, deals):
+    global _origin_checks_remaining
+    authorized = db.active_monitored_items()
+    candidates = [d for d in deals if d["origin"] == "unknown"
+                  and any(filters.identifies_monitored(d, item) for item in authorized)]
+    for deal in sorted(candidates, key=lambda d: d["price"])[:_origin_checks_remaining]:
+        _origin_checks_remaining -= 1
+        try:
+            page.goto(deal["url"], wait_until="domcontentloaded", timeout=30000)
+            if is_ml_verification(page):
+                mark_ml_verification(page.url)
+                break
+            shipping = page.locator(".ui-pdp-container--column-right").all_inner_texts()
+            text = " ".join(shipping).lower()
+            title = page.locator("h1.ui-pdp-title").inner_text(timeout=5000)
+            price_el = page.query_selector(".ui-pdp-price__second-line .andes-money-amount__fraction")
+            cents_el = page.query_selector(".ui-pdp-price__second-line .andes-money-amount__cents")
+            if not price_el or not db.comparable_product(deal["title"], title):
+                continue
+            price = _to_float(price_el.inner_text())
+            if price and cents_el:
+                price += int(cents_el.inner_text()) / 100
+            if not price:
+                continue
+            deal["price"] = price
+            if any(t in text for t in ("internacional", "importação", "china")):
+                deal["origin"] = "international"
+            elif "estoque disponível" in text and any(t in text for t in ("chegará", "retire grátis")):
+                deal["origin"] = "national"
+        except Exception as exc:
+            print(f"[ML] comparação inconclusiva: {str(exc)[:300]}")
+    return deals
+
+
 def search_mercadolivre(keyword: str, min_discount: int):
     """Scraping da busca do ML usando a sessão logada persistente
     (chrome_profile_ml) — passa pelo anti-bot."""
@@ -28,7 +71,12 @@ def search_mercadolivre(keyword: str, min_discount: int):
         ctx = _get_context()
         page = ctx.new_page()
         try:
-            page.goto(url, timeout=45000)
+            resp = page.goto(url, timeout=45000)
+            if resp is not None and resp.status >= 400:
+                mark_ml_verification(page.url)
+                print(f"[ML] bloqueio HTTP {resp.status} em '{keyword}'")
+                page.close()
+                return []
             if is_ml_verification(page):
                 mark_ml_verification(page.url)
                 print(f"[ML] captcha/verificação em '{keyword}'")
@@ -74,6 +122,9 @@ def search_mercadolivre(keyword: str, min_discount: int):
                 continue
             title_el = link_el
             price = _to_float(price_el.inner_text())
+            cents_el = card.query_selector(".poly-price__current .andes-money-amount__cents")
+            if price and cents_el:
+                price += int(cents_el.inner_text()) / 100
             original = _to_float(orig_el.inner_text()) if orig_el else None
             if not price:
                 continue
@@ -81,10 +132,13 @@ def search_mercadolivre(keyword: str, min_discount: int):
                 round((1 - price / original) * 100)
                 if original and original > price else 0
             )
-            if discount < min_discount:
-                continue
             m = re.search(r"/p/([A-Z0-9]+)|MLB-?(\d+)", href)
-            pid = m.group(0) if m else href.split("?")[0][:80]
+            parsed = urlparse(href)
+            params = parse_qs(parsed.query)
+            selected_item = re.search(r"item_id:(MLB\d+)", params.get("pdp_filters", [""])[0])
+            pid = selected_item[1] if selected_item else (m.group(0) if m else href.split("?")[0][:80])
+            selection = {key: params[key] for key in ("pdp_filters", "searchVariation", "variation_id") if key in params}
+            clean_url = urlunparse(parsed._replace(query=urlencode(selection, doseq=True), fragment=""))
             if pid in seen:
                 continue
             seen.add(pid)
@@ -92,16 +146,18 @@ def search_mercadolivre(keyword: str, min_discount: int):
                 {
                     "id": f"ml-{pid}",
                     "store": "Mercado Livre",
+                    "origin": "national" if any(t in card_text for t in ("chegará", "chega amanhã", "retire grátis")) else "unknown",
                     "title": title_el.inner_text().strip(),
                     "price": price,
                     "original_price": original or price,
                     "discount": discount,
-                    "url": href.split("#")[0].split("?")[0],
+                    "url": clean_url,
                     "image": (img_el.get_attribute("src")
                               or img_el.get_attribute("data-src") or "")
                               if img_el else "",
                 }
             )
+        _verify_market_origins(page, deals)
         page.close()
     except Exception as e:
         print(f"[ML] erro '{keyword}': {e}")

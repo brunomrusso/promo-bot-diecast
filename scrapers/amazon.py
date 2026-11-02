@@ -43,22 +43,20 @@ def search_amazon(keyword: str, min_discount: int):
         price_el = card.select_one(".a-price .a-offscreen")
         orig_el = card.select_one(".a-price.a-text-price .a-offscreen")
         img_el = card.select_one("img.s-image")
-        if not (asin and title_el and price_el and orig_el):
+        if not (asin and title_el and price_el):
             continue
         price = _to_float(price_el.get_text())
-        original = _to_float(orig_el.get_text())
-        if not price or not original or original <= price:
+        original = _to_float(orig_el.get_text()) if orig_el else None
+        if not price:
             continue
-        discount = round((1 - price / original) * 100)
-        if discount < min_discount:
-            continue
+        discount = round((1 - price / original) * 100) if original and original > price else 0
         deals.append(
             {
                 "id": f"amz-{asin}",
                 "store": "Amazon",
                 "title": title_el.get_text(strip=True),
                 "price": price,
-                "original_price": original,
+                "original_price": original or price,
                 "discount": discount,
                 "url": f"https://www.amazon.com.br/dp/{asin}",
                 "image": img_el.get("src", "") if img_el else "",

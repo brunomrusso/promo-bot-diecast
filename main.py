@@ -6,12 +6,13 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import config
-from core import affiliate, approvals, db, filters, manual_jobs
+from core import approvals, db, filters, manual_jobs
 from core.affiliate import to_affiliate_url
-from core.notifier import send_deal, send_for_approval, send_price_alert
+from core.notifier import send_for_approval
 from scrapers import close_browser, get_scrapers
-from scrapers.coupons import search_coupons
-from scrapers.ml_coupons import collect_ml_coupons, ml_available
+from scrapers.ml_coupons import ml_available
+from scrapers.mercadolivre import ml_api_ready
+from scrapers.mercadolivre_pw import reset_comparison_budget
 
 
 def _is_quiet():
@@ -28,182 +29,93 @@ def _is_quiet():
     return start <= now < end
 
 
-def _ml_search_plan(search_plan, monitored):
-    monitored_terms = {item["search_terms"] for item in monitored}
-    priority = [(term, discount) for term, discount in search_plan.items()
-                if term in monitored_terms]
-    regular = [(term, discount) for term, discount in search_plan.items()
-               if term not in monitored_terms]
-    if not regular:
-        return priority
-    state = db.get_system_state().get("ml_search_cursor")
-    cursor = int(state["value"] if state else 0) % len(regular)
-    selected = [regular[(cursor + offset) % len(regular)] for offset in range(min(3, len(regular)))]
-    db.set_system_state("ml_search_cursor", (cursor + len(selected)) % len(regular))
-    return priority + selected
-
-
 def _check_deals():
-    seen_this_round = set()
-    lego_count = 0
+    reset_comparison_budget()
+    manual_jobs.process_jobs()
+    manual_jobs.process_scheduled()
+    archived = db.reconcile_catalog_queue()
     monitored = db.active_monitored_items()
-    brand_floor = db.minimum_brand_discount()
-    search_floor = min(config.MIN_DISCOUNT, brand_floor) \
-        if brand_floor is not None else config.MIN_DISCOUNT
-    search_plan = {keyword: search_floor for keyword in config.load_keywords()}
-    for item in monitored:
-        search_plan[item["search_terms"]] = 0
+    terms = list(dict.fromkeys(
+        query for item in monitored
+        for query in filters.search_queries(item["search_terms"])))
+    candidates = {item["id"]: {} for item in monitored}
+    new_opportunities = 0
+    if not terms:
+        db.set_system_state("catalog", {"active": 0, "new_opportunities": 0, "archived": archived})
+        return
     for store_name, scraper in get_scrapers():
         store_started = time.time()
         store_offers = 0
         store_errors = []
-        if store_name == "Mercado Livre" and not ml_available():
+        if (store_name == "Mercado Livre" and not ml_api_ready()
+                and not ml_available()):
             db.update_store_health(store_name, "blocked", error="Verificação manual necessária")
             continue
-        store_plan = _ml_search_plan(search_plan, monitored) \
-            if store_name == "Mercado Livre" else search_plan.items()
-        for keyword, min_discount in store_plan:
-            db.set_system_state("heartbeat", {"phase": "searching",
-                                               "store": store_name,
-                                               "keyword": keyword})
+        state_key = f"catalog_cursor_{store_name}"
+        state = db.get_system_state().get(state_key)
+        cursor = int(state["value"] if state else 0) % len(terms)
+        selected = [terms[(cursor + i) % len(terms)] for i in range(min(3, len(terms)))]
+        db.set_system_state(state_key, cursor + len(selected))
+        for keyword in selected:
+            db.set_system_state("heartbeat", {"phase": "searching", "store": store_name, "keyword": keyword})
             manual_jobs.process_jobs()
             manual_jobs.process_scheduled()
+            current_items = db.active_monitored_items()
+            if not any(keyword in filters.search_queries(item["search_terms"])
+                       for item in current_items):
+                continue
             try:
-                deals = scraper(keyword, min_discount)
+                deals = scraper(keyword, 0)
                 store_offers += len(deals)
             except Exception as exc:
-                deals = []
                 store_errors.append(f"{keyword}: {exc}")
-            if store_name == "Mercado Livre" and not ml_available():
+                continue
+            if (store_name == "Mercado Livre" and not ml_api_ready()
+                    and not ml_available()):
                 store_errors.append("Verificação manual necessária")
                 break
+            manual_jobs.process_jobs(urgent_only=True)
             time.sleep(random.uniform(2, 5))  # evita rate limit/captcha
+            current_items = db.active_monitored_items()
             for deal in deals:
-                tracked = [item for item in monitored
-                           if item["search_terms"] == keyword
-                           and filters.identifies_monitored(deal, item)]
+                if deal.get("origin") == "international" or not deal.get("price"):
+                    continue
+                tracked = [item for item in current_items if filters.identifies_monitored(deal, item)]
+                if not tracked:
+                    continue
+                db.record_product_price(deal)
                 for item in tracked:
                     db.record_price(item["id"], deal)
-                if deal["id"] in seen_this_round:
-                    continue
-                repost = False
-                if db.already_posted(deal["id"]):
-                    if db.should_repost(deal["id"], deal.get("price", 0)):
-                        repost = True
-                        print(f"[↻] republicar: preço caiu >15%: {deal['title'][:50]}")
-                    else:
-                        continue
-                # Price alert: skip if user said "Caro" and price is still above target
-                triggered_alert = db.check_price_alerts(
-                    deal["title"], deal["price"], deal["store"])
-                if triggered_alert:
-                    print(f"[!] alerta de preço atingido: {deal['title'][:50]} "
-                          f"R${deal['price']:.2f} <= R${triggered_alert['target_price']:.2f}")
-                    if not _is_quiet():
-                        send_price_alert(triggered_alert, deal)
-                if db.is_price_above_alert(deal["title"], deal["price"]):
-                    continue
-                watched = next((item for item in tracked
-                                if deal["price"] <= item["max_price"]), None)
-                brand_rule = db.match_brand_rule(deal["title"])
-                if not watched and not filters.passes(deal, lego_count, brand_rule):
-                    continue
-                seen_this_round.add(deal["id"])
-                if filters.is_lego(deal["title"]):
-                    lego_count += 1
-                link = to_affiliate_url(deal)
-                monetized = affiliate.is_monetized(link, store_name)
-                # Calculate relevance score
-                score_data = filters.relevance_score(deal, brand_rule)
-                deal["_score"] = score_data["score"]
-                deal["_score_reasons"] = "; ".join(score_data["reasons"])
-                if watched:
-                    needs_approval = False
-                elif brand_rule and brand_rule["approval_mode"] == "manual":
-                    needs_approval = True
-                elif brand_rule and brand_rule["approval_mode"] == "auto":
-                    needs_approval = False
-                elif score_data["auto_action"] == "approve" and monetized:
-                    needs_approval = False
-                    print(f"[★] score {score_data['score']}: auto-aprovado: {deal['title'][:50]}")
-                elif score_data["auto_action"] == "reject":
-                    db.mark_posted(deal["id"], store_name,
-                                   deal["title"], deal["price"],
-                                   status="rejected", url=deal["url"],
-                                   image=deal.get("image", ""),
-                                   original_price=deal["original_price"],
-                                   discount=deal["discount"],
-                                   brand_rule_id=brand_rule["id"] if brand_rule else None,
-                                   brand_name=brand_rule["name"] if brand_rule else "",
-                                   relevance_score=score_data["score"],
-                                   score_reasons=deal["_score_reasons"])
-                    print(f"[✗] score {score_data['score']}: auto-rejeitado: {deal['title'][:50]}")
-                    continue
-                elif brand_rule:
-                    needs_approval = deal["discount"] < brand_rule["auto_approve_discount"]
-                else:
-                    needs_approval = deal["discount"] < config.AUTO_APPROVE_MIN
-                _score_args = dict(
-                    relevance_score=deal.get("_score"),
-                    score_reasons=deal.get("_score_reasons", ""))
-                if (config.TELEGRAM_ADMIN_CHAT_ID
-                        and (needs_approval or not monetized)):
-                    quiet = _is_quiet()
-                    sent = not quiet and send_for_approval(deal, link)
-                    db.mark_posted(deal["id"], store_name,
-                                   deal["title"], deal["price"],
-                                   status="pending", url=deal["url"],
-                                   image=deal.get("image", ""),
-                                   original_price=deal["original_price"],
-                                   discount=deal["discount"],
-                                   brand_rule_id=brand_rule["id"] if brand_rule else None,
-                                   brand_name=brand_rule["name"] if brand_rule else "",
-                                   **_score_args)
-                    if quiet:
-                        print(f"[z] silêncio, enfileirado: {deal['title'][:60]}")
-                    else:
-                        print(f"[?] aprovação (score {deal.get('_score','-')}): {deal['title'][:60]}")
-                    continue
-                quiet = _is_quiet()
-                if quiet:
-                    db.mark_posted(deal["id"], store_name,
-                                   deal["title"], deal["price"],
-                                   status="pending", url=deal["url"],
-                                   image=deal.get("image", ""),
-                                   original_price=deal["original_price"],
-                                   discount=deal["discount"],
-                                   brand_rule_id=brand_rule["id"] if brand_rule else None,
-                                   brand_name=brand_rule["name"] if brand_rule else "",
-                                   **_score_args)
-                    print(f"[z] silêncio, enfileirado auto: {deal['title'][:60]}")
-                    continue
-                if send_deal(deal, link):
-                    db.mark_posted(deal["id"], store_name, deal["title"],
-                                   deal["price"], url=deal["url"],
-                                   image=deal.get("image", ""),
-                                   original_price=deal["original_price"],
-                                   discount=deal["discount"],
-                                   brand_rule_id=brand_rule["id"] if brand_rule else None,
-                                   brand_name=brand_rule["name"] if brand_rule else "",
-                                   **_score_args)
-                    db.record_publication_details(deal["id"], deal, link)
-                    print(f"[+] {deal['store']}: {deal['title'][:60]} "
-                          f"({deal['discount']}% off)")
-                    time.sleep(2)  # respeita rate limit do Telegram
-        db.update_store_health(
-            store_name, "degraded" if store_errors else "healthy",
-            store_offers, time.time() - store_started, " | ".join(store_errors))
-    manual_jobs.process_jobs()
-    for coupon in (search_coupons() + collect_ml_coupons())[
-            :config.MAX_COUPONS_PER_CYCLE]:
-        if db.already_posted(coupon["id"]):
+                    candidates.setdefault(item["id"], {})[deal["id"]] = deal
+        db.update_store_health(store_name, "degraded" if store_errors else "healthy",
+                               store_offers, time.time() - store_started, " | ".join(store_errors))
+    for item in db.active_monitored_items():
+        offers = list(candidates.get(item["id"], {}).values())
+        if not offers or new_opportunities >= 5:
             continue
-        link = to_affiliate_url(coupon)
-        if send_deal(coupon, link):
-            db.mark_posted(coupon["id"], "Cupom", coupon["title"], 0)
-            print(f"[+] Cupom: {coupon['coupon']} — {coupon['store']}")
-            time.sleep(2)
-    print("[*] ciclo concluído")
+        national = [deal for deal in offers if deal.get("origin") == "national"]
+        deal = min(national or offers, key=lambda d: d["price"])
+        # Learned rejection: history says this price is bad
+        reason = db.catalog_opportunity_reason(item, deal)
+        if not reason:
+            continue
+        # Calculate relevance score
+        rule = db.match_brand_rule(deal["title"])
+        if rule and not db.brand_limit_available(rule):
+            continue
+        # Same product in another pending listing: keep the cheapest
+        if not db.enqueue_catalog_opportunity(item["id"], deal):
+            continue
+        new_opportunities += 1
+        link = to_affiliate_url(deal)
+        if config.TELEGRAM_ADMIN_CHAT_ID and not _is_quiet():
+            send_for_approval(deal, link)
+            time.sleep(2)  # respeita rate limit do Telegram
+        print(f"[catálogo] oportunidade para revisão: {item['name'][:60]} — R$ {deal['price']:.2f}")
+    manual_jobs.process_jobs()
+    db.set_system_state("catalog", {"active": len(monitored), "new_opportunities": new_opportunities,
+                                     "archived": archived, "queue_limit": 20, "cycle_limit": 5})
+    print("[*] ciclo do catálogo concluído")
 
 
 def check_deals():

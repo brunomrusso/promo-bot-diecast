@@ -76,7 +76,7 @@ def create_backup():
                 if integrity != "ok":
                     raise RuntimeError(f"Falha de integridade do SQLite: {integrity}")
                 included = ["database/deals.db"]
-                for relative in [".env", "keywords.txt", "AGENTS.md"]:
+                for relative in [".env", "AGENTS.md"]:
                     if _copy(ROOT / relative, stage / "config" / relative):
                         included.append(f"config/{relative}")
                 profile = ROOT / "chrome_profile_ml"

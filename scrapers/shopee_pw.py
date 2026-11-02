@@ -83,7 +83,7 @@ def search_shopee(keyword: str, min_discount: int):
                 round((1 - price / original) * 100)
                 if price and original and original > price else 0
             )
-            if not price or discount < min_discount:
+            if not price:
                 continue
             img_el = card.query_selector("img")
             pid = href.split("?")[0]

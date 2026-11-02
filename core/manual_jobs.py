@@ -2,16 +2,17 @@ import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
 import requests as http_requests
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from core import db, filters
 from core.affiliate import is_monetized, to_affiliate_url
 from core.notifier import format_whatsapp, send_deal, send_whatsapp_ready
 from scrapers import get_scrapers
-from scrapers.ml_coupons import _get_context, mark_ml_ready, mark_ml_verification
+from scrapers.ml_coupons import _get_context, mark_ml_ready, mark_ml_verification, ml_available
 
 
 def _number(value):
@@ -54,13 +55,44 @@ def _clean_url(url):
         asin = _extract_asin(url)
         if asin:
             return f"{parsed.scheme}://{parsed.netloc}/dp/{asin}"
-    # Mercado Livre: strip tracking params
-    if "mercadolivre" in host or "mercadolibre" in host:
-        return urlunparse(parsed._replace(query=urlencode({}), fragment=""))
+    # Mercado Livre: strip tracking params; if the pasted link is an
+    # affiliate/social redirect, extract the embedded product URL first.
+    if "mercadolivre" in host or "mercadolibre" in host or "meli.la" in host:
+        if host == "meli.la" or parsed.path.lower().startswith("/social/"):
+            return url
+        for key in ("url", "link", "redirect", "adurl", "u"):
+            candidate = parse_qs(parsed.query).get(key)
+            if candidate:
+                embedded = urlparse(unquote(candidate[0]))
+                if "mercadolivre" in (embedded.hostname or "").lower():
+                    return _clean_url(unquote(candidate[0]))
+        params = parse_qs(parsed.query)
+        selection = {key: params[key] for key in ("pdp_filters", "searchVariation", "variation_id")
+                     if key in params}
+        return urlunparse(parsed._replace(query=urlencode(selection, doseq=True), fragment=""))
     # Shopee: strip tracking params
     if "shopee" in host:
         return urlunparse(parsed._replace(query="", fragment=""))
     return url
+
+
+_INTL_MARKERS = (
+    "compra internacional", "envio internacional", "produto internacional",
+    "import fees", "taxas de importação", "taxa de importação",
+    "mercado livre global",
+)
+
+
+def _is_international(text):
+    """Detect international-purchase markers in the page content."""
+    lower = (text or "").lower()
+    if any(marker in lower for marker in _INTL_MARKERS):
+        return True
+    # Amazon BR: domestic seller is "Amazon.com.br"; US seller shows "Amazon.com"
+    if '"merchantName":"Amazon.com"' in text or \
+            re.search(r"vendido\s+por:?\s*amazon\.com(?![.\w])", lower):
+        return True
+    return False
 
 
 def _extract_asin(url):
@@ -276,6 +308,7 @@ def _extract_amazon_fast(url):
         "discount": discount,
         "url": clean,
         "image": image,
+        "international": _is_international(html_text),
         "_error": None,
     }
 
@@ -292,8 +325,61 @@ def _json_products(value):
             yield from _json_products(item)
 
 
+def _resolve_promotion_product(url):
+    host = (urlparse(url).hostname or "").lower()
+    if host not in {"uaidesconto.link", "www.uaidesconto.link"}:
+        return url
+    response = http_requests.get(
+        url, headers={**_AMAZON_HEADERS, "Accept-Encoding": "gzip, deflate"},
+        timeout=20, allow_redirects=False)
+    response.raise_for_status()
+    match = re.search(r'<script\b[^>]*\bid=[\"\']__NEXT_DATA__[\"\'][^>]*>(.*?)</script>',
+                      response.text, re.DOTALL)
+    if match:
+        try:
+            product = json.loads(match.group(1))["props"]["pageProps"]["product"]
+            candidates = [product.get("originalValues", {}).get("url"),
+                          product.get("initial_link")]
+            for candidate in candidates:
+                if not isinstance(candidate, str):
+                    continue
+                parsed = urlparse(candidate)
+                hostname = (parsed.hostname or "").lower()
+                if (parsed.scheme == "https" and not parsed.username
+                        and not parsed.password
+                        and (hostname == "mercadolivre.com.br"
+                             or hostname.endswith(".mercadolivre.com.br"))
+                        and re.search(r'/(?:up/MLBU\d+|p/MLB\d+)|/MLB-?\d+', parsed.path)):
+                    return _clean_url(candidate)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            pass
+    raise ValueError("Não foi possível recuperar o produto desta página de divulgação. "
+                     "Cole o link da página do produto, não o perfil do afiliado.")
+
+
+def _social_product_url(page):
+    links = page.get_by_role("link", name="Ir para produto", exact=True)
+    try:
+        links.first.wait_for(state="visible", timeout=8000)
+    except PlaywrightTimeoutError:
+        raise ValueError("O perfil abriu sem um produto compartilhado em destaque. "
+                         "Nenhum item das recomendações foi selecionado.") from None
+    candidates = set()
+    for href in links.evaluate_all("els => els.map(e => e.href)"):
+        parsed = urlparse(href)
+        host = (parsed.hostname or "").lower()
+        if (parsed.scheme == "https" and not parsed.username and not parsed.password
+                and parsed.port in (None, 443)
+                and (host == "mercadolivre.com.br" or host.endswith(".mercadolivre.com.br"))
+                and re.search(r'/(?:up/MLBU\d+|p/MLB\d+)|/MLB-?\d+', parsed.path)):
+            candidates.add(_clean_url(href))
+    if len(candidates) != 1:
+        raise ValueError("O compartilhamento não identificou um único produto com segurança.")
+    return candidates.pop()
+
+
 def extract_link(url):
-    url = _clean_url(url)
+    url = _clean_url(_resolve_promotion_product(url))
     store = _store(url)
     # Amazon: fast HTTP extraction (no Playwright needed)
     if store == "Amazon":
@@ -304,7 +390,16 @@ def extract_link(url):
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(1500)
         final_url = page.url
-        body_lower = page.inner_text("body")[:4000].lower()
+        if (_store(final_url) == "Mercado Livre"
+                and urlparse(final_url).path.lower().startswith("/social/")):
+            product_url = _social_product_url(page)
+            page.goto(product_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(1500)
+            final_url = page.url
+            if urlparse(final_url).path.lower().startswith("/social/"):
+                raise ValueError("O Mercado Livre não abriu a página do produto compartilhado.")
+        body_text = page.inner_text("body")
+        body_lower = body_text[:4000].lower()
         title = ""
         image = ""
         price = 0
@@ -352,6 +447,7 @@ def extract_link(url):
                 if original:
                     break
         store = _store(final_url)
+        product_url = _clean_url(final_url)
         discount = round((1 - price / original) * 100) if original > price > 0 else 0
         is_captcha = (
             "captcha" in final_url
@@ -363,14 +459,15 @@ def extract_link(url):
         if store == "Mercado Livre":
             mark_ml_verification(final_url) if is_captcha else mark_ml_ready()
         return {
-            "id": "manual-" + hashlib.sha1(final_url.encode()).hexdigest()[:16],
+            "id": "manual-" + hashlib.sha1(product_url.encode()).hexdigest()[:16],
             "store": store,
             "title": title,
             "price": price,
             "original_price": original or price,
             "discount": discount,
-            "url": final_url,
+            "url": product_url,
             "image": image,
+            "international": _is_international(body_text),
             "_error": "Mercado Livre exige verificação de segurança. Recarregue a sessão." if is_captcha else None,
         }
     finally:
@@ -432,11 +529,99 @@ def publish_deal(deal):
                        brand_rule_id=rule["id"] if rule else None,
                        brand_name=rule["name"] if rule else "")
     db.record_publication_details(deal.get("_pending_id") or deal["id"], deal, link)
+    db.record_product_price(deal, "approved")
+    db.supersede_pending([s["product_id"] for s in db.similar_pending(
+        deal["title"], exclude_id=deal.get("_pending_id") or deal["id"])])
     return {"published": True, "whatsapp": format_whatsapp(deal, link),
             "affiliate_url": link}
 
 
+def run_coupon_blitz(payload: dict) -> dict:
+    """Varredura de cupom relâmpago: busca preço atual por mini, aplica o
+    cupom e enfileira pendentes para aprovação."""
+    from scrapers import _ALL
+    from scrapers.lomadee import coupon_status
+    from scrapers.mercadolivre import ml_coupon_status
+    code = str(payload.get("code", "")).strip().upper()
+    store = payload.get("store") or "Mercado Livre"
+    scraper = dict(get_scrapers() or _ALL.values()).get(store)
+    verification = (ml_coupon_status(code) if store == "Mercado Livre"
+                    else coupon_status(code))
+    if verification == "unverifiable":
+        verification = coupon_status(code)
+    summary = {"code": code, "store": store, "verification": verification,
+               "queued": 0, "skipped": [], "errors": []}
+    if not scraper:
+        summary["errors"].append(f"Loja {store} não está habilitada")
+        return summary
+    notified = 0
+    for item_id in payload.get("item_ids", []):
+        item = db.get_monitored_item(item_id)
+        if not item:
+            summary["skipped"].append(f"mini #{item_id}: não encontrada")
+            continue
+        offers, seen = [], set()
+        for query in filters.search_queries(item["search_terms"]) or [item["search_terms"]]:
+            try:
+                offers.extend(scraper(query, 0))
+            except Exception as exc:
+                summary["errors"].append(f"{item['name']}: {str(exc)[:120]}")
+        matches = []
+        for deal in offers:
+            if deal["id"] in seen or not deal.get("price"):
+                continue
+            seen.add(deal["id"])
+            if filters.monitored_match_diagnostic(deal, item)["matches"]:
+                matches.append(deal)
+        candidates = [d for d in matches if d.get("origin") != "international"] or matches
+        if not candidates:
+            summary["skipped"].append(f"{item['name']}: sem oferta correspondente")
+            continue
+        best = min(candidates, key=lambda d: d["price"])
+        deal = dict(best, manual_coupon_code=code,
+                    manual_coupon_type=payload.get("kind", "percent"),
+                    manual_coupon_value=payload.get("value", 0),
+                    manual_coupon_min_purchase=payload.get("min_purchase", 0),
+                    manual_coupon_max_discount=payload.get("cap", 0),
+                    manual_coupon_final_price="")
+        try:
+            deal = normalize_manual_coupon(deal)
+        except ValueError as exc:
+            summary["skipped"].append(f"{item['name']}: {exc}")
+            continue
+        verification_label = {"verified": "verificado no feed Lomadee",
+                              "not_found": "não consta no feed — confirme no checkout",
+                              "unverifiable": "verificação indisponível"}[summary["verification"]]
+        note = (f"Cupom {code} · R$ {best['price']:.2f} → R$ "
+                f"{deal['manual_coupon_final_price']:.2f} · {verification_label}")
+        if db.enqueue_coupon_deal(item_id, deal, deal, note):
+            summary["queued"] += 1
+            if notified < 10:
+                try:
+                    if send_approval_ping(deal, summary["verification"]):
+                        notified += 1
+                except Exception:
+                    pass
+    return summary
+
+
+def send_approval_ping(deal: dict, verification: str) -> bool:
+    """Notifica o admin no Telegram com os botões de aprovação."""
+    from core.notifier import send_for_approval
+    verify_label = {"verified": "✅ verificado", "not_found": "⚠️ confirme no checkout",
+                    "unverifiable": "⚠️ não verificável"}[verification]
+    heading = (f"🎟️ <b>CUPOM {deal['manual_coupon_code']}</b> ({verify_label})\n"
+               f"Final estimado: R$ {deal['manual_coupon_final_price']:.2f}\n\n")
+    return send_for_approval(deal, "", heading=heading)
+
+
 def process_scheduled():
+    for blitz in db.due_blitzes():
+        db.set_blitz_status(blitz["id"], "running")
+        try:
+            db.set_blitz_status(blitz["id"], "done", run_coupon_blitz(blitz["payload"]))
+        except Exception as exc:
+            db.set_blitz_status(blitz["id"], "error", error=str(exc))
     settings = db.get_setting("schedule", {
         "quiet_start": "23:00", "quiet_end": "08:00",
         "min_interval": 10, "timezone": "America/Sao_Paulo"})
@@ -470,8 +655,8 @@ def process_scheduled():
             db.set_scheduled_status(item["id"], "error", str(exc))
 
 
-def process_jobs():
-    for row in db.claim_jobs():
+def process_jobs(urgent_only=False):
+    for row in db.claim_jobs(urgent_only=urgent_only):
         try:
             payload = json.loads(row["payload"])
             if row["action"] == "restart_bot":
@@ -492,18 +677,53 @@ def process_jobs():
                     raise ValueError("Mini monitorada não encontrada")
                 results = []
                 seen = set()
+                diagnostics = []
                 scrapers = get_scrapers()
-                for store_name, scraper in scrapers:
-                    for deal in scraper(item["search_terms"], 0):
-                        if deal["id"] in seen or not filters.identifies_monitored(deal, item):
+                for idx, (store_name, scraper) in enumerate(scrapers, 1):
+                    db.set_system_state("scan_progress", {
+                        "item_id": item["id"], "store": store_name,
+                        "index": idx, "total": len(scrapers)})
+                    report = {"store": store_name, "received": 0, "matched": 0,
+                              "discarded": 0, "duplicates": 0, "missing_terms": {},
+                              "samples": [], "status": "ok"}
+                    diagnostics.append(report)
+                    offers = []
+                    query_errors = []
+                    for query in filters.search_queries(item["search_terms"]) or [item["search_terms"]]:
+                        try:
+                            offers.extend(scraper(query, 0))
+                        except Exception as exc:
+                            query_errors.append(f"{query}: {exc}"[:200])
+                    if not offers and query_errors:
+                        report.update(status="error", error="; ".join(query_errors))
+                        continue
+                    report["received"] = len(offers)
+                    if not offers:
+                        report["status"] = "empty"
+                        if store_name == "Mercado Livre" and not ml_available():
+                            report.update(status="error", error="Mercado Livre requer verificação manual da sessão")
+                    for deal in offers:
+                        if deal["id"] in seen:
+                            report["duplicates"] += 1
                             continue
+                        match = filters.monitored_match_diagnostic(deal, item)
+                        if not match["matches"]:
+                            report["discarded"] += 1
+                            for term in match["missing_terms"]:
+                                report["missing_terms"][term] = report["missing_terms"].get(term, 0) + 1
+                            if len(report["samples"]) < 5:
+                                report["samples"].append({"title": deal["title"], "reasons": match["reasons"]})
+                            continue
+                        report["matched"] += 1
                         seen.add(deal["id"])
                         db.record_price(item["id"], deal)
+                        db.record_product_price(deal)
                         deal["previously_posted"] = db.already_posted(deal["id"])
                         deal["fair_price"] = deal["price"] <= item["max_price"]
                         deal["quality"] = db.deal_price_quality(
                             deal["title"], deal["price"], item["id"])
                         results.append(deal)
+                    process_jobs(urgent_only=True)
                 results.sort(key=lambda deal: deal["price"])
                 if results:
                     minimum = results[0]["price"]
@@ -513,11 +733,36 @@ def process_jobs():
                             "count": len(results), "stores": stores,
                             "min_price": minimum, "best": deal["price"] == minimum,
                         }
-                db.finish_job(row["id"], {
-                    "item": item,
-                    "results": results[:30],
-                    "stores_searched": len(scrapers),
-                })
+                scan_result = {
+                    "item": item, "results": results[:30], "matches_total": len(results),
+                    "stores_searched": len(scrapers), "diagnostics": diagnostics,
+                    "completed_at": datetime.utcnow().isoformat(timespec="seconds"),
+                }
+                db.set_setting(f"monitored_scan_{item['id']}", scan_result)
+                db.set_system_state("scan_progress", {})
+                db.finish_job(row["id"], scan_result)
+            elif row["action"] == "share_monitored":
+                if not db.get_monitored_item(payload["item_id"]):
+                    raise ValueError("Mini monitorada não encontrada")
+                deal = normalize_manual_coupon(payload["deal"])
+                link = to_affiliate_url(deal)
+                if not is_monetized(link, deal["store"]):
+                    raise ValueError("Não foi possível gerar um link monetizado para compartilhar")
+                db.finish_job(row["id"], {"whatsapp": format_whatsapp(deal, link),
+                                          "affiliate_url": link})
+            elif row["action"] == "share_pending":
+                pending = db.get_pending(payload["product_id"])
+                if not pending:
+                    raise ValueError("Oferta já foi decidida ou não existe")
+                store, title, price, url, image, original, discount = pending
+                deal = {"id": payload["product_id"], "store": store, "title": title,
+                        "price": price, "url": url, "image": image,
+                        "original_price": original, "discount": discount}
+                link = to_affiliate_url(deal)
+                if not is_monetized(link, store):
+                    raise ValueError("Não foi possível gerar um link monetizado para compartilhar")
+                db.finish_job(row["id"], {"whatsapp": format_whatsapp(deal, link),
+                                          "affiliate_url": link})
             elif row["action"] == "approve_pending":
                 pending = db.get_pending(payload["product_id"])
                 if not pending:
@@ -535,7 +780,7 @@ def process_jobs():
                     "id": payload["product_id"], "store": store, "title": title,
                     "price": price, "url": url, "image": image,
                     "original_price": original, "discount": discount,
-                    **payload.get("coupon", {}),
+                    **(payload.get("coupon") or db.pending_coupon_fields(payload["product_id"])),
                 })
                 rule = db.match_brand_rule(deal["title"])
                 if rule and not db.brand_limit_available(rule):
@@ -549,6 +794,9 @@ def process_jobs():
                               rule["id"] if rule else None,
                               rule["name"] if rule else "")
                 db.record_publication_details(deal["id"], deal, link)
+                db.record_product_price(deal, "approved")
+                db.supersede_pending([s["product_id"] for s in db.similar_pending(
+                    deal["title"], exclude_id=deal["id"])])
                 send_whatsapp_ready(deal, link)
                 db.finish_job(row["id"], {
                     "published": True,

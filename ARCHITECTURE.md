@@ -42,29 +42,24 @@ Loop contínuo que executa ciclos de busca a cada `CHECK_INTERVAL_MINUTES`:
 ┌─────────────────────────────────────────────────────┐
 │                    Ciclo do Bot                      │
 │                                                     │
-│  1. Carregar keywords e configurações dinâmicas     │
-│  2. Para cada loja habilitada:                      │
-│     ├─ Buscar produtos por keyword                  │
-│     ├─ Para cada produto:                           │
-│     │   ├─ Verificar duplicata (já postado?)        │
-│     │   ├─ Verificar republicação (preço caiu >15%)│
-│     │   ├─ Verificar alerta de preço               │
-│     │   ├─ Registrar preço em minis monitoradas     │
-│     │   ├─ Aplicar filtros de relevância            │
-│     │   ├─ Verificar regra de marca                 │
-│     │   ├─ Gerar link de afiliado                   │
-│     │   ├─ Verificar período silencioso             │
-│     │   └─ Enviar para aprovação ou publicar        │
-│  3. Coletar cupons do ML (se habilitado)            │
-│  4. Processar publicações agendadas                 │
-│  5. Aguardar intervalo                              │
+│  1. Carregar somente o catálogo ativo               │
+│  2. Arquivar pendentes legados sem veredito humano   │
+│  3. Por loja: até 3 buscas autorizadas, em rotação   │
+│     ├─ Descartar itens fora dos termos obrigatórios │
+│     ├─ Registrar preços autorizados silenciosamente │
+│     └─ Selecionar uma oferta por produto            │
+│  4. Alvo atingido ou histórico nacional confiável?  │
+│     ├─ Não: apenas aprendizado                     │
+│     └─ Sim: enfileirar para revisão manual          │
+│  5. Limites: 5 entradas/ciclo, 20 pendentes          │
+│  6. Processar jobs manuais e agenda explícita        │
+│  7. Aguardar intervalo; não publicar autonomamente  │
 └─────────────────────────────────────────────────────┘
 ```
 
 **Threads:**
-- `main thread`: loop de scraping + publicação
-- `approvals thread`: polling de callbacks do Telegram (botões inline)
-- `scheduler thread`: APScheduler para processar publicações agendadas
+- `main thread`: loop de scraping, publicação e processamento da fila de jobs (`manual_jobs.process_jobs`, com lotes urgentes entre cada keyword/produto)
+- `approvals thread`: polling de callbacks do Telegram (botões inline); aprovações viram jobs na mesma fila
 
 ### 2. Dashboard (`dashboard.py`)
 
@@ -73,7 +68,7 @@ Aplicação Flask servida via Gunicorn (1 worker) com as seguintes responsabilid
 - **Autenticação**: login por usuário/senha via variáveis de ambiente
 - **Pages**: 15 templates Jinja2 server-rendered
 - **API REST**: endpoints JSON para aprovações, extração, publicação, alertas, blacklist
-- **Jobs assíncronos**: extração de produto e publicação rodam em threads separadas via `manual_jobs.py`
+- **Fila de jobs**: o painel grava pedidos na tabela `manual_jobs` (extração de produto, aprovar, compartilhar, agendar); o **bot** os executa entre as etapas seguras do scraping, com prioridade para ações manuais (`urgent_only`) — sem threads nem Chrome extra no dashboard
 
 ### 3. Scrapers (`scrapers/`)
 
@@ -86,7 +81,7 @@ Cada loja tem dois scrapers: HTTP direto (leve) e Playwright (navegador real, pa
 | Shopee | `shopee.py` | `shopee_pw.py` | API interna não-oficial |
 | Lomadee | `lomadee.py` | — | API oficial de rede de afiliados |
 
-**Decisão**: O scraper HTTP é preferido quando possível (mais rápido, menos recursos). Playwright é fallback para lojas que exigem JavaScript ou sessão de navegador.
+**Decisão**: O scraper HTTP é preferido quando possível (mais rápido, menos recursos). Playwright é fallback para lojas que exigem JavaScript ou sessão de navegador. Todas as variantes Playwright compartilham **um único contexto persistente** (`chrome_profile_ml`) para evitar processos Chrome concorrentes na VM de 1 GB.
 
 ### 4. Banco de dados (`db.py`)
 
@@ -134,7 +129,33 @@ SQLite único (`deals.db`) com as seguintes tabelas:
 │ referer, ua         │     ├──────────────────────┤
 └─────────────────────┘     │ key → value (JSON)   │
                             └──────────────────────┘
+
+┌─────────────────────┐     ┌──────────────────────┐
+│   product_prices     │     │    manual_jobs        │
+├─────────────────────┤     ├──────────────────────┤
+│ signature, prod_id  │     │ action, status       │
+│ store, title, price │     │ payload/result (JSON)│
+│ verdict (seen/      │     │ error, updated_at    │
+│ approved/rejected)  │     └──────────────────────┘
+│ day, seen_at        │
+│ UNIQUE(prod_id,day) │     ┌──────────────────────┐
+└─────────────────────┘     │    system_state       │
+                            ├──────────────────────┤
+┌─────────────────────┐     │ key (heartbeat,      │
+│   affiliate_links    │     │ ml_session, cycle)   │
+├─────────────────────┤     │ value (JSON)         │
+│ store, source_url   │     └──────────────────────┘
+│ affiliate_url       │
+│ updated_at          │     ┌──────────────────────┐
+└─────────────────────┘     │    store_health       │
+                            ├──────────────────────┤
+                            │ store, status        │
+                            │ offers, duration     │
+                            │ error, last_check    │
+                            └──────────────────────┘
 ```
+
+**Status possíveis em `posted`:** `pending` (na fila), `posted`, `rejected`, `auto_rejected` (rejeição aprendida pelo histórico), `superseded` (substituído por anúncio equivalente melhor), `blacklisted`, `expired`, `scheduled`, `price_alert`, `catalog_archived` (arquivamento neutro da busca aberta).
 
 **Decisão**: SQLite foi escolhido por simplicidade (zero configuração), backup trivial (copiar 1 arquivo), e performance suficiente para o volume (~300 deals/semana).
 
@@ -144,7 +165,6 @@ Responsável por toda comunicação com a API do Telegram:
 
 - `send_deal()` → Publica no canal (com imagem, tracking link)
 - `send_for_approval()` → Envia ao admin com botões inline
-- `send_price_alert()` → Notifica que alerta foi atingido
 - `send_whatsapp_ready()` → Envia texto formatado para WhatsApp
 - `format_whatsapp()` → Gera texto para cópia manual
 
@@ -155,48 +175,98 @@ URL original
     │
     ▼
 ┌─────────────────────┐
+│  cached_affiliate_url│ → cache persistente (affiliate_links, 7 dias)
+│         │ miss       │
 │  to_affiliate_url() │
 │                     │
 │  Amazon?  → limpa URL, adiciona ?tag=AMAZON_TAG
-│  ML?      → meli.la/PREFIXO/URL (ou Lomadee)
-│  Shopee?  → Lomadee deeplink
+│  ML?      → linkbuilder meli.la via sessão logada (Playwright persistente)
+│  Shopee?  → Lomadee deeplink (ou sub-id do programa)
 │  Lomadee? → já vem monetizado
 └─────────────────────┘
     │
     ▼
-is_monetized() → valida se link contém tag/prefixo
+is_monetized() → exige https + host meli.la/lmdee.link exato,
+                 ou domínio Amazon com a tag configurada
 ```
 
-**Regra**: Nunca publicar link não-monetizado intencionalmente. Se a monetização falhar, o produto vai para aprovação manual.
+**Regra**: Nunca publicar link não-monetizado intencionalmente. Se a geração falhar, a URL original é devolvida mas **rejeitada pelo `is_monetized`** — o job falha com "link não monetizado" em vez de publicar sem comissão. Links colados com tag de terceiros (parâmetros `matt_*`, redirects `meli.la`/`/social/`) são normalizados para a URL do produto antes de gerar o link próprio.
+
+### 7. Aprendizado de preços e deduplicação (`db.py`)
+
+O sistema aprende "o que é um preço bom" em vez de depender só de cadastros manuais:
+
+```
+Somente ofertas que correspondem ao catálogo ativo
+    │
+    ▼
+title_signature() → conjunto de tokens relevantes do título
+                    (ignora enchimento: "carrinhos", "novo", "frete"...)
+    │
+    ▼
+product_prices: 1 linha por anúncio por dia (preço público, sem cupom)
+    ├─ verdict='seen'      → avistamento normal
+    ├─ verdict='approved'  → usuário aprovou/publicou
+    └─ verdict='rejected'  → usuário rejeitou/bloqueou
+    │
+    ▼
+market_price_evaluation() → equivalência conservadora por tokens (≥0,70)
+    com restrições de referência, ano, quantidade e cor
+    │
+    ▼
+Somente origin='national'; registros legados ficam 'unknown'
+    ├─ alternativas de hoje por anúncio (sem cupom e sem frete)
+    └─ mínimos por dia, com peso igual entre dias, nos últimos 90 dias
+    │
+    ▼
+Decisão no ciclo fechado:
+    ├─ alvo explícito atingido → candidato para revisão
+    ├─ sem alvo, preço favorável + ≥5 dias + alternativa nacional atual → candidato para revisão
+    └─ acima do alvo, sem histórico ou sem confiança → aprendizado silencioso
+
+Percentual OFF não filtra coleta nem participa do score.
+Relevância é temática; não significa preço bom.
+Até 3 termos autorizados por loja/ciclo em rotação. Até 2 verificações de origem por ciclo no ML, somente de produtos cadastrados, no mesmo Chrome. A leitura usa a coluna de compra/entrega, não recomendações. Origem desconhecida não autoriza uma oportunidade aprendida; alvo explícito pode gerar revisão com aviso para conferir origem e frete.
+```
+
+**Fila por cadastro** (`enqueue_catalog_opportunity`, transação `BEGIN IMMEDIATE`):
+- Um pendente por `monitored_item_id`; melhoria acima de 1% substitui o anterior (`superseded`).
+- `catalog_opportunities` mantém o último preço apresentado. Após uma decisão/expiração, exige queda de pelo menos 3% para reapresentar.
+- Até 5 entradas por ciclo e 20 pendentes do catálogo. Acima desses limites, continua coletando sem gerar cards.
+- `catalog_archives` preserva a origem dos pendentes da busca aberta. Eles viram `catalog_archived`, não `rejected`; preços e vereditos não são apagados.
+
+**Segurança:** o ciclo automático não publica produtos nem cupons abertos no canal; só solicita revisão. Jobs de publicação manual e agendas confirmadas continuam independentes. Origem nacional e histórico confiável não dispensam revisão. Rejeições genéricas não impõem teto permanente de preço. O criador manual não autoriza monitoramento por si só: o usuário deve clicar em “Autorizar monitoramento” e salvar o cadastro.
+
+**Auditoria e desfazer:** a Central de aprovações tem uma seção "Decisões recentes" (7 dias) listando `rejected`, `auto_rejected` e `superseded` com o motivo (`score_reasons`). O botão **Restaurar** limpa o veredito `rejected` do anúncio (e registros legados sem ID da mesma assinatura). Só devolve ao `pending` se autorizado ou manual, respeitando os limites; fora do catálogo, desfaz a decisão sem iniciar monitoramento.
 
 ---
 
+### 8. Histórico orientado à curadoria
+
+- `/monitored/<id>?days=7|30|90` filtra gráfico, estatísticas e comparação por loja. `monitored_price_summary` conta leituras e dias distintos; a profundidade exibida considera 90 dias, independentemente do período selecionado. Menos de 5 dias nunca é apresentado como avaliação conclusiva.
+- A interface prioriza a menor oferta com indicação nacional entre os anúncios carregados. Sem indicação nacional, destaca a menor de origem desconhecida com aviso; importados não são apresentados como candidata nacional. Alternativas e diagnóstico ficam recolhidos.
+- Filtros por alvo e origem movem/ocultam os mesmos cards, preservando inputs de cupom e estado do compartilhamento. Os contadores descrevem somente o conjunto carregado da última pesquisa, não toda a internet.
+- `/api/monitored/<id>/target` exige login e valida valor finito não negativo; vazio/zero significa aprender sem alvo. Atualiza somente `monitored_items.max_price`. A tela atualiza diferenças por oferta e a linha tracejada do gráfico sem recarregar nem criar novo cadastro.
+- O gráfico usa Canvas já existente: mínimo/média/máximo por dia, espaçamento por datas, alvo incluído na escala e cores adaptadas ao tema. As médias mostradas são das coletas, não estimativa de preço justo; frete/cupom/taxas não estão incluídos.
+
 ## Fluxos principais
 
-### Fluxo de publicação automática
+### Fluxo de oportunidade do catálogo
 
 ```
-Scraper encontra deal
-    │
-    ├─ Já postado? ──────── Sim ──► Verificar republicação (>15% queda)
-    │                                    │
-    │                               Não reposta ──► Ignorar
-    │
-    ├─ Alerta ativo? ───── Preço acima ──► Ignorar
-    │                       │
-    │                       Preço atingiu ──► Notificar + Enviar p/ aprovação
-    │
-    ├─ Filtros passam? ──── Não ──► Ignorar
-    │
-    ├─ Período silencioso? ─ Sim ──► Salvar como pending (sem notificar)
-    │
-    ├─ Aprovação manual? ── Sim ──► Telegram admin (botões inline)
-    │                                    │
-    │                               Aprovar ──► Publicar no canal
-    │                               Rejeitar ──► Marcar rejeitado
-    │                               Bloquear ──► Adicionar à blacklist
-    │
-    └─ Auto-aprovar ──────────────────────► Publicar no canal
+Catálogo ativo → buscar somente termos dos produtos cadastrados
+    ├─ Fora dos critérios / internacional → ignorar
+    └─ Produto autorizado → registrar preço
+         ├─ Sem alvo atingido ou histórico confiável → aprender silenciosamente
+         └─ Oportunidade → conferir repetição e limites
+              ├─ Mesmo preço / pior / fila cheia → não gerar card
+              └─ Novo ou melhor → pending (um por produto)
+                   ├─ Horário silencioso → sem notificação
+                   └─ Fora do silêncio → avisar admin para revisar
+
+Aprovação explícita → reextrair preço → validar link monetizado → publicar
+Rejeição explícita → registrar veredito humano
+Não existe saída de auto-publicação no ciclo de monitoramento.
 ```
 
 ### Fluxo de criação manual
@@ -220,21 +290,55 @@ Usuário edita/confirma/adiciona cupom
     └─ "Monitorar mini" ───► Criar monitoramento
 ```
 
-### Fluxo de alerta de preço
+### Fluxo de compartilhamento WhatsApp (sem API)
+
+Também disponível nos cards da pesquisa em Minis monitoradas. O endpoint `/api/monitored/<id>/share` recupera a oferta da pesquisa salva (não aceita título, preço ou link fornecidos pelo cliente), aplica o cupom validado e retorna o texto com link monetizado. Se necessário, cria o job prioritário `share_monitored`, sem publicação ou agendamento. A versão da pesquisa e alterações do cupom invalidam preparações desatualizadas.
+
+O WhatsApp não tem API gratuita para anexar imagem com legenda. O painel usa o
+compartilhamento nativo do navegador (`whatsapp-share.js`), igual na Central de
+aprovações e no criador de anúncios:
+
+```
+Usuário toca "WhatsApp" no card
+    │
+    ├─ Link monetizado em cache? ── Sim ──► resposta direta (sem fila)
+    │                        └ Não ──► job 'share_pending' prioritário no bot
+    │
+    ▼
+"Copiar legenda" → clipboard com texto formatado (plain + HTML com quebras)
+    │
+    ▼
+"Enviar foto" → Web Share API só com a imagem JPEG (WebP é convertido
+                via canvas, senão o WhatsApp a trata como documento)
+    │
+    ▼
+Usuário escolhe o WhatsApp e cola o texto em "Adicionar legenda" na prévia
+```
+
+Compartilhar **não** aprova nem publica a oferta — o card permanece na fila.
+Edição posterior do anúncio invalida o compartilhamento preparado.
+Fallbacks no menu "⋯": copiar só o texto, baixar só a imagem, abrir foto original.
+
+### Fluxo de alerta de preço (unificado no catálogo)
+
+O alvo é uma propriedade única da mini monitorada (`monitored_items.max_price`).
+A antiga tabela `price_alerts` virou legado somente-leitura.
 
 ```
 Usuário marca "Caro" na aprovação
     │
     ├─ Define preço-alvo (padrão: 80% do atual)
-    └─ Produto sai da fila, vai para Alertas
+    └─ Alvo gravado em monitored_items.max_price da mini de origem
+       (oferta sai da fila como price_alert)
     │
     ▼
-Bot encontra produto novamente
+Bot coleta preços da mini a cada ciclo
     │
-    ├─ Preço > alvo ──► Ignorar silenciosamente
-    └─ Preço ≤ alvo ──► Marcar triggered
-                        ├─ Notificar no Telegram pessoal
-                        └─ Enviar para aprovação
+    ├─ Preço > alvo ──► Aprendizado silencioso (sem card)
+    └─ Preço ≤ alvo ──► Oportunidade para revisão na Central
+
+Alertas antigos sem mini correspondente ficam listados como "legado"
+na tela de Minis até serem removidos ou vinculados (migrated=1).
 ```
 
 ---
@@ -265,7 +369,8 @@ Bot encontra produto novamente
 ### Por que não WhatsApp Bot?
 - APIs oficiais do WhatsApp Business são pagas para mensagens promocionais
 - APIs não-oficiais causam banimento da conta
-- Solução: gerar texto formatado para WhatsApp que o usuário cola manualmente
+- Solução: compartilhamento nativo do navegador (foto JPEG via Web Share API) +
+  legenda copiada para a área de transferência — ver fluxo em "Fluxos principais"
 
 ---
 

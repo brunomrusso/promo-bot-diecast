@@ -1,6 +1,6 @@
 import re
+import unicodedata
 
-import config
 from core import db
 
 # ---------------------------------------------------------------------------
@@ -32,18 +32,7 @@ def relevance_score(deal: dict, brand_rule=None) -> dict:
     price = deal.get("price", 0) or 0
 
     # --- Discount bonus (up to +25) ---
-    if discount >= 50:
-        score += 25
-        reasons.append(f"Desconto excelente ({discount}%)")
-    elif discount >= 40:
-        score += 18
-        reasons.append(f"Bom desconto ({discount}%)")
-    elif discount >= 30:
-        score += 10
-        reasons.append(f"Desconto razoável ({discount}%)")
-    elif discount < 15:
-        score -= 15
-        reasons.append(f"Desconto baixo ({discount}%)")
+    reasons.append("Relevância temática; desconto informado pela loja não pontua")
 
     # --- Brand rule bonus (up to +15) ---
     if brand_rule:
@@ -69,20 +58,7 @@ def relevance_score(deal: dict, brand_rule=None) -> dict:
                 break
 
     # --- Price quality from history (up to +15 / -10) ---
-    quality = db.deal_price_quality(deal.get("title", ""), price)
-    hist_label = quality.get("label", "")
-    if hist_label == "recorde":
-        score += 15
-        reasons.append("Menor preço histórico!")
-    elif hist_label == "excelente":
-        score += 10
-        reasons.append("Preço excelente vs histórico")
-    elif hist_label == "boa":
-        score += 5
-        reasons.append("Bom preço vs histórico")
-    elif hist_label == "cara":
-        score -= 10
-        reasons.append("Preço acima do normal")
+    quality = deal.get("_price_evaluation") or db.market_price_evaluation(deal.get("title", ""), price, deal.get("id", ""))
 
     # --- Rejection pattern penalty (up to -20) ---
     penalty = _rejection_penalty(title)
@@ -102,7 +78,7 @@ def relevance_score(deal: dict, brand_rule=None) -> dict:
     score = max(0, min(100, score))
 
     # Determine auto action
-    if score >= 75:
+    if score >= 75 and quality["confident"] and deal.get("origin") == "national":
         auto_action = "approve"
     elif score <= 25:
         auto_action = "reject"
@@ -139,48 +115,46 @@ def _rejection_penalty(title: str) -> int:
     return 0
 
 
-def is_relevant(title: str) -> bool:
-    t = title.lower()
-    if any(b in t for b in config.load_blocklist_terms()):
-        return False
-    if is_lego(title):
-        return any(term in t for term in config.load_lego_car_terms())
-    return any(term in t for term in config.load_relevant_terms())
-
-
-def is_lego(title: str) -> bool:
-    t = title.lower()
-    return any(term in t for term in config.LEGO_TERMS)
-
-
-def passes(deal: dict, lego_count: int, brand_rule=None) -> bool:
-    """Aplica regras de relevância e o cap de LEGO por ciclo."""
+def monitored_match_diagnostic(deal: dict, item: dict) -> dict:
+    def normalize(value):
+        value = unicodedata.normalize("NFKD", value.lower()).encode("ascii", "ignore").decode()
+        return re.sub(r"\b(8\d|9\d)\b", r"19\1", value)
+    title = normalize(deal["title"])
+    required = [normalize(t.strip()) for t in item["required_terms"].split(",") if t.strip()]
+    stopwords = {"e", "de", "do", "da", "the", "and", "com", "a", "o"}
+    missing = []
+    for term in required:
+        words = [w for w in re.findall(r"[a-z0-9]+", term) if w not in stopwords]
+        missing_words = []
+        for w in words:
+            pattern = (r"(?<!\d)" + re.escape(w) + r"(?!\d)" if w.isdigit()
+                       else r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])")
+            if not re.search(pattern, title):
+                missing_words.append(w)
+        if missing_words:
+            missing.append(term if missing_words == words else f"{term} ({' '.join(missing_words)})")
+    reasons = []
+    if db.monitored_offer_excluded(item.get("id"), deal):
+        reasons.append("Marcado como outra mini neste cadastro")
+    if not required:
+        reasons.append("Nenhum termo obrigatório cadastrado")
+    if missing:
+        reasons.append("Faltam os trechos: " + ", ".join(missing))
+    if deal.get("origin") == "international":
+        reasons.append("Compra internacional fora da comparação nacional")
     if db.is_blacklisted(deal):
-        return False
-    if not is_relevant(deal["title"]):
-        return False
-    if brand_rule:
-        if deal["discount"] < brand_rule["min_discount"]:
-            return False
-        if not db.brand_limit_available(brand_rule):
-            return False
-        return True
-    if is_lego(deal["title"]):
-        if deal["discount"] < config.LEGO_MIN_DISCOUNT:
-            return False
-        if lego_count >= config.LEGO_MAX_PER_CYCLE:
-            return False
-    return True
+        reasons.append("Produto ou título na blacklist")
+    if not deal.get("price"):
+        reasons.append("Preço não extraído")
+    return {"matches": not reasons, "missing_terms": missing, "reasons": reasons}
+
+
+def search_queries(raw_terms: str) -> list:
+    return [q.strip() for q in re.split(r"[;\n]+", raw_terms or "") if q.strip()]
 
 
 def identifies_monitored(deal: dict, item: dict) -> bool:
-    title = deal["title"].lower()
-    required = [t.strip().lower() for t in item["required_terms"].split(",")
-                if t.strip()]
-    return (not db.is_blacklisted(deal)
-            and bool(required)
-            and all(term in title for term in required)
-            and bool(deal.get("price")))
+    return monitored_match_diagnostic(deal, item)["matches"]
 
 
 def matches_monitored(deal: dict, item: dict) -> bool:

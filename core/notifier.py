@@ -43,14 +43,14 @@ def _format(deal: dict, link: str) -> str:
         if deal.get("manual_coupon_min_purchase"):
             text += f"Compra mínima: R$ {deal['manual_coupon_min_purchase']:.2f}\n"
         text += "\n"
-    return text + f"👉 <a href=\"{link}\">Comprar</a>"
+    return text + (f"👉 <a href=\"{html.escape(link, quote=True)}\">Comprar</a>" if link else "")
 
 
-def send_for_approval(deal: dict, link: str) -> bool:
+def send_for_approval(deal: dict, link: str, heading=None) -> bool:
     """Manda a oferta pro admin com botões de aprovar/rejeitar."""
     if not config.TELEGRAM_ADMIN_CHAT_ID:
         return False
-    text = "⏳ <b>APROVAR?</b>\n\n" + _format(deal, link)
+    text = (heading if heading is not None else "⏳ <b>APROVAR?</b>\n\n") + _format(deal, link)
     keyboard = {"inline_keyboard": [
         [
             {"text": "✅ Postar", "callback_data": f"ok:{deal['id']}"},
@@ -137,36 +137,22 @@ def send_whatsapp_ready(deal: dict, link: str) -> None:
         pass
 
 
-def send_price_alert(alert: dict, deal: dict) -> bool:
-    """Notifica o admin que um alerta de preço foi atingido."""
+def notify_admin(text: str) -> None:
+    """Aviso operacional ao admin no Telegram (nunca vai ao canal)."""
     if not config.TELEGRAM_ADMIN_CHAT_ID:
-        return False
-    title = html.escape(alert["title"])
-    text = (f"🔔 <b>ALERTA DE PREÇO ATINGIDO!</b>\n\n"
-            f"<b>{title}</b>\n\n"
-            f"Alvo: <b>R$ {alert['target_price']:.2f}</b>\n"
-            f"Preço atual: <b>R$ {deal['price']:.2f}</b>\n"
-            f"Loja: {deal['store']}\n\n"
-            f"O produto voltou para a fila de aprovação.")
+        return
     try:
-        if deal.get("image"):
-            resp = requests.post(f"{API}/sendPhoto", json={
+        requests.post(
+            f"{API}/sendMessage",
+            json={
                 "chat_id": config.TELEGRAM_ADMIN_CHAT_ID,
-                "photo": deal["image"],
-                "caption": text,
-                "parse_mode": "HTML",
-            }, timeout=15)
-            if resp.status_code == 200:
-                return True
-        resp = requests.post(f"{API}/sendMessage", json={
-            "chat_id": config.TELEGRAM_ADMIN_CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML",
-        }, timeout=15)
-        return resp.status_code == 200
+                "text": text,
+                "disable_web_page_preview": True,
+            },
+            timeout=15,
+        )
     except requests.RequestException as e:
-        print(f"[Telegram] erro ao enviar alerta de preço: {e}")
-        return False
+        print(f"[Telegram] erro ao avisar admin: {e}")
 
 
 def send_deal(deal: dict, link: str) -> bool:

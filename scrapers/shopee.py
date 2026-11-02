@@ -41,11 +41,9 @@ def search_shopee(keyword: str, min_discount: int):
         info = item.get("item_basic", {})
         price = info.get("price", 0) / 100000
         original = info.get("price_before_discount", 0) / 100000
-        if not price or not original or original <= price:
+        if not price:
             continue
-        discount = round((1 - price / original) * 100)
-        if discount < min_discount:
-            continue
+        discount = round((1 - price / original) * 100) if original and original > price else 0
         shopid, itemid = info["shopid"], info["itemid"]
         deals.append(
             {
@@ -53,7 +51,7 @@ def search_shopee(keyword: str, min_discount: int):
                 "store": "Shopee",
                 "title": info["name"],
                 "price": price,
-                "original_price": original,
+                "original_price": original or price,
                 "discount": discount,
                 "url": f"https://shopee.com.br/product/{shopid}/{itemid}",
                 "image": (

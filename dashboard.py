@@ -10,6 +10,21 @@ from flask import Flask, flash, jsonify, redirect, render_template, request, ses
 import config
 from core import backup, db, health
 
+CHANNEL_PROMOTION_DEFAULT = """**Quem coleciona sabe: encontrar a mini certa por um preço bom faz parte da diversão.**
+
+Estou reunindo achados e ofertas de **Hot Wheels, Mini GT, Kaido House, Disney/Pixar Cars e outras miniaturas** em canais no Telegram e no WhatsApp.
+
+A ideia é facilitar a vida de quem quer aumentar a coleção sem precisar ficar procurando em várias lojas. Compartilho ofertas selecionadas e acompanho preços para ajudar a identificar boas oportunidades.
+
+Se quiser acompanhar, escolha a plataforma que preferir:
+
+**Telegram:** https://t.me/promocoes_diecast
+**WhatsApp:** https://chat.whatsapp.com/HHMNjLKePG3AWpLT6CDfm6
+
+Os canais são gratuitos. Preços e estoques podem mudar.
+
+**Qual mini você está procurando para a sua coleção?**"""
+
 app = Flask(__name__)
 app.secret_key = os.getenv("PANEL_SECRET_KEY", "change-this-key")
 app.config.update(
@@ -17,6 +32,19 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.getenv("PANEL_HTTPS", "1") == "1",
     SESSION_COOKIE_SAMESITE="Lax",
 )
+
+
+@app.template_filter("sp_datetime")
+def sp_datetime(value):
+    if not value:
+        return "—"
+    try:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y %H:%M:%S")
+    except (ValueError, TypeError):
+        return "—"
 
 
 @app.before_request
@@ -47,7 +75,7 @@ def runtime_context():
         with db._conn() as conn:
             row = conn.execute("SELECT COUNT(*) FROM posted WHERE status='pending'").fetchone()
             pending_count = row[0] if row else 0
-            row2 = conn.execute("SELECT COUNT(*) FROM price_alerts WHERE triggered=0").fetchone()
+            row2 = conn.execute("SELECT COUNT(*) FROM monitored_items WHERE active=1 AND max_price>0").fetchone()
             active_alerts = row2[0] if row2 else 0
     except Exception:
         pass
@@ -93,7 +121,7 @@ def index():
             "pending": conn.execute("SELECT COUNT(*) FROM posted WHERE status='pending'").fetchone()[0],
             "monitored": conn.execute("SELECT COUNT(*) FROM monitored_items WHERE active=1").fetchone()[0],
             "blocked": conn.execute("SELECT COUNT(*) FROM blacklist WHERE active=1").fetchone()[0],
-            "alerts": conn.execute("SELECT COUNT(*) FROM price_alerts WHERE triggered=0").fetchone()[0],
+            "alerts": conn.execute("SELECT COUNT(*) FROM monitored_items WHERE active=1 AND max_price>0").fetchone()[0],
             "scheduled": conn.execute("SELECT COUNT(*) FROM scheduled_posts WHERE status='scheduled'").fetchone()[0],
         }
         history = [dict(r) for r in conn.execute(
@@ -220,12 +248,62 @@ def manual():
     return render_template("manual.html")
 
 
+@app.get("/cupom-relampago")
+@login_required
+def coupon_blitz():
+    items = db.list_monitored_items()
+    return render_template("coupon_blitz.html", items=items,
+                           blitzes=db.list_blitzes())
+
+
+@app.post("/api/coupon-blitz")
+@login_required
+def api_coupon_blitz():
+    data = request.json or {}
+    code = str(data.get("code", "")).strip().upper()
+    try:
+        value = float(data.get("value") or 0)
+        cap = float(data.get("cap") or 0)
+        min_purchase = float(data.get("min_purchase") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Desconto, teto e compra mínima precisam ser números"}), 400
+    item_ids = [int(i) for i in data.get("item_ids", []) if str(i).isdigit()]
+    if not code or value <= 0 or not item_ids:
+        return jsonify({"error": "Informe o código, o desconto e pelo menos uma mini"}), 400
+    run_at = str(data.get("run_at", "")).strip()
+    if run_at:
+        try:
+            local = datetime.fromisoformat(run_at).replace(
+                tzinfo=ZoneInfo("America/Sao_Paulo"))
+            utc = local.astimezone(timezone.utc).replace(tzinfo=None)
+        except ValueError:
+            return jsonify({"error": "Data/hora inválida"}), 400
+        if utc <= datetime.utcnow():
+            return jsonify({"error": "Escolha um horário futuro ou deixe vazio para rodar agora"}), 400
+    else:
+        utc = datetime.utcnow()
+    blitz_id = db.create_blitz({
+        "code": code, "kind": data.get("kind", "percent"), "value": value,
+        "cap": cap, "min_purchase": min_purchase,
+        "store": data.get("store") or "Mercado Livre", "item_ids": item_ids,
+    }, utc.isoformat(sep=" ", timespec="seconds"))
+    return jsonify({"blitz_id": blitz_id})
+
+
+@app.post("/cupom-relampago/<int:blitz_id>/cancel")
+@login_required
+def coupon_blitz_cancel(blitz_id):
+    db.cancel_blitz(blitz_id)
+    flash("Disparo de cupom cancelado", "success")
+    return redirect(url_for("coupon_blitz"))
+
+
 @app.get("/approvals")
 @login_required
 def approval_center():
     items, stores = db.list_pending(
         request.args.get("store", ""), request.args.get("q", ""),
-        request.args.get("sort", "discount_desc"))
+        request.args.get("sort", "newest"))
     quality = request.args.get("quality", "")
     if quality:
         items = [item for item in items if item["quality"]["key"] == quality]
@@ -234,9 +312,177 @@ def approval_center():
     pages = max(1, (total + per_page - 1) // per_page)
     page = min(max(1, request.args.get("page", 1, type=int)), pages)
     items = items[(page - 1) * per_page:page * per_page]
+    from core.affiliate import cached_affiliate_url
+    for item in items:
+        item["share_link_ready"] = bool(item.get("url") and cached_affiliate_url(item))
     return render_template("approvals.html", items=items, stores=stores,
+                           decisions=db.list_decisions(), catalog=db.catalog_summary(),
                            expiry_hours=db.get_setting("approval_expiry_hours", 24),
                            total=total, page=page, pages=pages)
+
+
+@app.post("/api/decisions/<path:product_id>/restore")
+@login_required
+def api_restore_decision(product_id):
+    if not db.restore_decision(product_id):
+        return jsonify({"error": "Não foi possível restaurar: autorize o produto no catálogo e verifique se já há oportunidade pendente ou se a fila atingiu 20 itens."}), 409
+    pending = bool(db.get_pending(product_id))
+    message = ("Oferta restaurada para revisão. Recarregue a página." if pending else
+               "Veredito desfeito sem penalidade. O produto continua fora da fila; autorize-o no catálogo para monitorar.")
+    return jsonify({"ok": True, "pending": pending, "message": message})
+
+
+@app.post("/api/approvals/share")
+@login_required
+def approval_share():
+    from core.affiliate import cached_affiliate_url
+    from core.notifier import format_whatsapp
+
+    product_id = str((request.json or {}).get("product_id", ""))
+    pending = db.get_pending(product_id)
+    if not pending:
+        return jsonify({"error": "Oferta pendente não encontrada"}), 404
+    store, title, price, url, image, original, discount = pending
+    deal = {"id": product_id, "store": store, "title": title, "price": price,
+            "url": url, "image": image, "original_price": original, "discount": discount}
+    link = cached_affiliate_url(deal)
+    if link:
+        return jsonify({"result": {"whatsapp": format_whatsapp(deal, link),
+                                   "affiliate_url": link}, "cached": True})
+    if not health.bot_indicator()["online"]:
+        return jsonify({"error": "O bot precisa estar ativo para gerar o link monetizado"}), 503
+    return jsonify({"job_id": db.create_job("share_pending", {"product_id": product_id})})
+
+
+@app.get("/api/approvals/<path:product_id>/image")
+@login_required
+def approval_image(product_id):
+    pending = db.get_pending(product_id)
+    if not pending or not pending[4]:
+        return jsonify({"error": "Imagem não disponível"}), 404
+    return _product_image(pending[4])
+
+
+@app.post("/api/manual/share")
+@login_required
+def manual_share():
+    from math import isfinite
+    from core.affiliate import cached_affiliate_url, is_monetized
+    from core.manual_jobs import normalize_manual_coupon
+    from core.notifier import format_whatsapp
+
+    data = request.json or {}
+    deal = data.get("deal")
+    if not isinstance(deal, dict) or any(not isinstance(deal.get(key), str) or not deal[key].strip()
+                                         for key in ("id", "store", "title", "url")):
+        return jsonify({"error": "Busque e preencha os dados do produto antes de compartilhar"}), 400
+    try:
+        for key in ("price", "original_price", "discount"):
+            deal[key] = float(deal.get(key) or 0)
+            if not isfinite(deal[key]) or deal[key] < 0:
+                raise ValueError("Preço ou desconto inválido")
+        if deal["price"] <= 0:
+            raise ValueError("Informe um preço válido")
+        deal = normalize_manual_coupon(deal)
+    except (ValueError, TypeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    link = deal.get("affiliate_url", "")
+    if not isinstance(link, str) or not is_monetized(link, deal["store"]):
+        link = cached_affiliate_url(deal)
+    if not link:
+        return jsonify({"error": "Busque o produto novamente para gerar um link monetizado"}), 400
+    text = data.get("text", "").strip() if isinstance(data.get("text", ""), str) else ""
+    text = text or format_whatsapp(deal, link)
+    if len(text) > 20000 or link not in text:
+        return jsonify({"error": "O texto para WhatsApp precisa conter o link monetizado validado"}), 400
+    return jsonify({"whatsapp": text, "affiliate_url": link})
+
+
+@app.post("/api/monitored/<int:item_id>/share")
+@login_required
+def monitored_share(item_id):
+    from math import isfinite
+    from core.affiliate import cached_affiliate_url
+    from core.manual_jobs import normalize_manual_coupon
+    from core.notifier import format_whatsapp
+
+    data = request.json or {}
+    scan = db.get_setting(f"monitored_scan_{item_id}", {})
+    product_id = data.get("product_id")
+    if data.get("scan_completed_at") is not None and data["scan_completed_at"] != scan.get("completed_at"):
+        return jsonify({"error": "A pesquisa foi atualizada. Recarregue o histórico antes de compartilhar."}), 409
+    offer = next((offer for offer in scan.get("results", []) if offer.get("id") == product_id), None)
+    if not db.get_monitored_item(item_id) or not offer:
+        return jsonify({"error": "Oferta não encontrada. Pesquise a mini novamente."}), 404
+    coupon = data.get("coupon", {})
+    if not isinstance(coupon, dict):
+        return jsonify({"error": "Cupom inválido"}), 400
+    deal = dict(offer)
+    try:
+        for key in ("manual_coupon_code", "manual_coupon_type", "manual_coupon_value",
+                    "manual_coupon_max_discount", "manual_coupon_min_purchase", "manual_coupon_final_price"):
+            if key in coupon:
+                deal[key] = coupon[key]
+        for key in ("price", "original_price", "discount", "manual_coupon_value", "manual_coupon_max_discount",
+                    "manual_coupon_min_purchase", "manual_coupon_final_price"):
+            if key not in deal:
+                continue
+            deal[key] = float(deal[key] or 0)
+            if not isfinite(deal[key]) or deal[key] < 0:
+                raise ValueError("Preço ou cupom inválido")
+        if deal.get("price", 0) <= 0:
+            raise ValueError("Oferta sem preço válido")
+        deal = normalize_manual_coupon(deal)
+    except (ValueError, TypeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    link = cached_affiliate_url(deal)
+    if link:
+        return jsonify({"whatsapp": format_whatsapp(deal, link), "affiliate_url": link})
+    if not health.bot_indicator()["online"]:
+        return jsonify({"error": "O bot precisa estar ativo para gerar o link monetizado"}), 503
+    return jsonify({"job_id": db.create_job("share_monitored", {"item_id": item_id, "deal": deal})})
+
+
+@app.post("/api/manual/image")
+@login_required
+def manual_image():
+    image = (request.json or {}).get("image", "")
+    if not isinstance(image, str) or not image:
+        return jsonify({"error": "Informe uma imagem do produto"}), 400
+    return _product_image(image)
+
+
+def _product_image(url):
+    from io import BytesIO
+    import requests
+    from flask import send_file
+
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return jsonify({"error": "Endereço de imagem inválido"}), 400
+    domains = ("mlstatic.com", "media-amazon.com", "images-amazon.com",
+               "susercontent.com", "shopeemobile.com")
+    if (parsed.scheme != "https" or parsed.netloc not in (host, host + ":443")
+            or parsed.username or parsed.password
+            or not any(host == d or host.endswith("." + d) for d in domains)):
+        return jsonify({"error": "Esta origem de imagem não permite download pelo painel"}), 400
+    try:
+        with requests.get(url, stream=True, timeout=(5, 15), allow_redirects=False) as response:
+            extensions = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+            mime = response.headers.get("Content-Type", "").split(";")[0].lower()
+            if response.status_code != 200 or mime not in extensions:
+                return jsonify({"error": "Não foi possível obter a imagem"}), 502
+            data = bytearray()
+            for chunk in response.iter_content(65536):
+                data.extend(chunk)
+                if len(data) > 8 * 1024 * 1024:
+                    return jsonify({"error": "Imagem excede o limite de 8 MB"}), 413
+    except requests.RequestException:
+        return jsonify({"error": "Falha ao baixar imagem da loja"}), 502
+    return send_file(BytesIO(data), mimetype=mime, as_attachment=True,
+                     download_name="oferta." + extensions[mime])
 
 
 @app.post("/api/approvals/action")
@@ -260,12 +506,15 @@ def api_approval_action():
             }))
         elif action == "reject":
             db.set_status(product_id, "rejected")
+            db.record_verdict(product_id, "rejected")
         elif action == "block_product":
             db.add_blacklist("product", product_id, title)
             db.set_status(product_id, "blacklisted")
+            db.record_verdict(product_id, "rejected")
         elif action == "block_title":
             db.add_blacklist("term", title, title)
             db.set_status(product_id, "blacklisted")
+            db.record_verdict(product_id, "rejected")
     return jsonify({"jobs": jobs, "processed": len(ids)})
 
 
@@ -273,22 +522,23 @@ def api_approval_action():
 @login_required
 def api_create_price_alert():
     data = request.json or {}
-    required = ["product_id", "title", "store", "target_price", "current_price"]
-    if any(not data.get(f) for f in required):
+    if not data.get("product_id"):
         return jsonify({"error": "Dados incompletos"}), 400
     try:
         target = float(data["target_price"])
-        current = float(data["current_price"])
-        if target <= 0 or target >= current:
+        current = float(data.get("current_price") or 0)
+        if target <= 0 or (current > 0 and target >= current):
             return jsonify({"error": "O preço-alvo deve ser menor que o preço atual"}), 400
     except (ValueError, TypeError):
         return jsonify({"error": "Preço inválido"}), 400
-    db.create_price_alert(
-        data["product_id"], data["title"], data["store"],
-        target, current, data.get("url", ""), data.get("image", ""))
-    # Reject the pending offer so it leaves the approval queue
-    db.set_status(data["product_id"], "price_alert")
-    return jsonify({"ok": True})
+    result = db.set_pending_target(data["product_id"], target)
+    if result["kind"] == "missing":
+        return jsonify({"error": "Oferta pendente não encontrada"}), 404
+    if result["kind"] == "legacy":
+        return jsonify({"ok": True, "kind": "legacy",
+                        "message": "Produto fora do catálogo: alerta criado como legado. Cadastre a mini para monitorar de verdade."})
+    return jsonify({"ok": True, "kind": "monitored", "item_id": result["item_id"],
+                    "message": "Alvo definido na mini monitorada."})
 
 
 @app.post("/api/blacklist")
@@ -307,23 +557,7 @@ def api_add_blacklist():
 @app.get("/price-alerts")
 @login_required
 def price_alerts_page():
-    return render_template("price_alerts.html",
-                           alerts=db.list_price_alerts(active_only=False))
-
-
-@app.post("/price-alerts/<int:alert_id>/edit")
-@login_required
-def price_alert_edit(alert_id):
-    try:
-        new_target = float(request.form.get("target_price", 0))
-        if new_target <= 0:
-            flash("Preço inválido", "error")
-        else:
-            db.update_price_alert_target(alert_id, new_target)
-            flash("Preço-alvo atualizado para R$ %.2f" % new_target, "success")
-    except (ValueError, TypeError):
-        flash("Preço inválido", "error")
-    return redirect(url_for("price_alerts_page"))
+    return redirect(url_for("monitored", f="alvo"))
 
 
 @app.post("/price-alerts/<int:alert_id>/delete")
@@ -331,7 +565,7 @@ def price_alert_edit(alert_id):
 def price_alert_delete(alert_id):
     db.delete_price_alert(alert_id)
     flash("Alerta removido", "success")
-    return redirect(url_for("price_alerts_page"))
+    return redirect(url_for("monitored", f="alvo"))
 
 
 @app.post("/api/extract")
@@ -377,6 +611,10 @@ def api_monitored_scan(item_id):
 @login_required
 def api_job(job_id):
     job = db.get_job(job_id)
+    if job and job.get("status") in ("pending", "processing"):
+        progress = db.get_system_state().get("scan_progress", {}).get("value")
+        if progress:
+            job["progress"] = progress
     return jsonify(job or {"error": "Tarefa não encontrada"}), 200 if job else 404
 
 
@@ -385,14 +623,19 @@ def api_job(job_id):
 def monitored():
     if request.method == "POST":
         item_id = request.form.get("id", type=int)
-        saved_id = db.save_monitored_item({
-            "name": request.form["name"],
-            "search_terms": request.form["search_terms"],
-            "required_terms": request.form.get("required_terms", ""),
-            "max_price": request.form["max_price"],
-            "active": request.form.get("active") == "on",
-            "image": request.form.get("image", ""),
-        }, item_id)
+        try:
+            saved_id = db.save_monitored_item({
+                "name": request.form.get("name", ""),
+                "search_terms": request.form.get("search_terms", ""),
+                "required_terms": request.form.get("required_terms", ""),
+                "tags": request.form.get("tags", ""),
+                "max_price": request.form.get("max_price", ""),
+                "active": request.form.get("active") == "on",
+                "image": request.form.get("image", ""),
+            }, item_id)
+        except (ValueError, TypeError) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("monitored"))
         observed_price = request.form.get("observed_price", type=float)
         if not item_id and observed_price and request.form.get("product_id"):
             db.record_price(saved_id, {
@@ -406,7 +649,27 @@ def monitored():
             })
         flash("Mini salva com sucesso", "success")
         return redirect(url_for("monitored"))
-    return render_template("monitored.html", items=db.list_monitored_items())
+    db.migrate_legacy_price_alerts()
+    items = db.list_monitored_items()
+    tags = db.monitored_tags()
+    selected_tag = " ".join(request.args.get("tag", "").split()).casefold()
+    if selected_tag:
+        items = [i for i in items if selected_tag in i["tags"]]
+    counts = {"all": len(items),
+              "alvo": sum(1 for i in items if i["state"] == "watching"),
+              "atingido": sum(1 for i in items if i["state"] == "target_hit"),
+              "aprendendo": sum(1 for i in items if i["state"] == "learning"),
+              "pausadas": sum(1 for i in items if i["state"] == "paused")}
+    active_filter = request.args.get("f", "all")
+    state_map = {"alvo": "watching", "atingido": "target_hit",
+                 "aprendendo": "learning", "pausadas": "paused"}
+    if active_filter in state_map:
+        items = [i for i in items if i["state"] == state_map[active_filter]]
+    else:
+        active_filter = "all"
+    return render_template("monitored.html", items=items, counts=counts,
+                           active_filter=active_filter, tags=tags, selected_tag=selected_tag,
+                           legacy_alerts=db.list_legacy_price_alerts())
 
 
 @app.get("/monitored/<int:item_id>")
@@ -415,9 +678,64 @@ def monitored_detail(item_id):
     item = db.get_monitored_item(item_id)
     if not item:
         return "Mini não encontrada", 404
-    summary, daily, stores, recent = db.monitored_price_history(item_id)
+    days = request.args.get("days", 90, type=int)
+    days = days if days in {7, 30, 90} else 90
+    summary, daily, stores, recent = db.monitored_price_history(item_id, days)
+    history_summary = summary if days == 90 else db.monitored_price_summary(item_id, 90)
     return render_template("monitored_detail.html", item=item, summary=summary,
-                           daily=daily, stores=stores, recent=recent)
+                           daily=daily, stores=stores, recent=recent, days=days,
+                           history_summary=history_summary,
+                           excluded=db.excluded_observations(item_id),
+                           last_scan=_curated_scan(item_id))
+
+
+def _curated_scan(item_id):
+    scan = db.get_setting(f"monitored_scan_{item_id}", None)
+    if scan:
+        scan["results"] = [d for d in scan.get("results", []) if not db.monitored_offer_excluded(item_id, d)]
+        scan["matches_total"] = len(scan["results"])
+    return scan
+
+
+@app.post("/monitored/<int:item_id>/observations/<int:observation_id>/curate")
+@login_required
+def curate_monitored_observation(item_id, observation_id):
+    action = request.form.get("action")
+    if action not in {"exclude", "restore"}:
+        return "Ação inválida", 400
+    if not db.curate_observation(item_id, observation_id, action == "exclude"):
+        return "Leitura não encontrada", 404
+    flash("Anúncio desconsiderado apenas nesta mini." if action == "exclude" else "Leituras restauradas nesta mini.", "success")
+    return redirect(url_for("monitored_detail", item_id=item_id))
+
+
+@app.post("/api/monitored/<int:item_id>/target")
+@login_required
+def api_monitored_target(item_id):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or "max_price" not in data:
+        return jsonify({"error": "Informe o alvo ou deixe em branco para aprender em silêncio."}), 400
+    try:
+        updated = db.update_monitored_target(item_id, data["max_price"])
+    except (ValueError, TypeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not updated:
+        return jsonify({"error": "Mini não encontrada"}), 404
+    return jsonify({"max_price": db.get_monitored_item(item_id)["max_price"]})
+
+
+@app.post("/monitored/<int:item_id>/toggle")
+@login_required
+def monitored_toggle(item_id):
+    item = db.get_monitored_item(item_id)
+    if not item:
+        return "Mini não encontrada", 404
+    if request.form.get("active") not in {"0", "1"}:
+        return "Estado inválido", 400
+    item["active"] = request.form["active"] == "1"
+    db.save_monitored_item(item, item_id)
+    flash("Monitoramento retomado" if item["active"] else "Monitoramento pausado", "success")
+    return redirect(url_for("monitored"))
 
 
 @app.post("/monitored/<int:item_id>/delete")
@@ -429,34 +747,50 @@ def monitored_delete(item_id):
 
 
 @app.route("/search-settings", methods=["GET", "POST"])
+@app.route("/settings", methods=["GET", "POST"])
 @login_required
 def search_settings():
+    if request.method == "POST" and request.form.get("section") == "channel_promotion":
+        text = request.form.get("channel_promotion", "").replace("\r\n", "\n").strip()
+        if not text or len(text) > 20000:
+            flash("Informe um texto de divulgação com até 20.000 caracteres", "error")
+        else:
+            db.set_setting("channel_promotion", text)
+            flash("Texto de divulgação salvo", "success")
+        return redirect(url_for("search_settings", _anchor="promotion"))
+    if request.method == "POST" and request.form.get("section") == "schedule":
+        try:
+            start = datetime.strptime(request.form["quiet_start"], "%H:%M").strftime("%H:%M")
+            end = datetime.strptime(request.form["quiet_end"], "%H:%M").strftime("%H:%M")
+            interval = int(request.form["min_interval"])
+            if not 1 <= interval <= 1440:
+                raise ValueError
+        except (KeyError, ValueError):
+            flash("Horários ou intervalo inválidos", "error")
+            return redirect(url_for("search_settings", _anchor="publishing"))
+        db.set_setting("schedule", {"quiet_start": start, "quiet_end": end,
+                                   "min_interval": interval, "timezone": "America/Sao_Paulo"})
+        flash("Horários atualizados", "success")
+        return redirect(url_for("search_settings", _anchor="publishing"))
     if request.method == "POST":
-        def lines(name):
-            return list(dict.fromkeys(
-                line.strip().lower() for line in request.form.get(name, "").splitlines()
-                if line.strip() and not line.strip().startswith("#")))
         enabled = request.form.getlist("enabled_stores")
         if not enabled:
             flash("Mantenha pelo menos uma loja habilitada", "error")
             return redirect(url_for("search_settings"))
-        for key in ["keywords", "relevant_terms", "blocklist_terms", "lego_car_terms"]:
-            values = lines(key)
-            if not values:
-                flash(f"A lista {key} não pode ficar vazia", "error")
-                return redirect(url_for("search_settings"))
-            db.set_setting(key, values)
         db.set_setting("enabled_stores", enabled)
         db.set_setting("approval_expiry_hours", max(1, request.form.get(
             "approval_expiry_hours", 24, type=int)))
         config.clear_dynamic_cache()
         flash("Configurações atualizadas; o próximo ciclo já usará as mudanças", "success")
         return redirect(url_for("search_settings"))
+    rules = db.list_brand_rules()
+    for rule in rules:
+        rule["today_count"] = db.brand_daily_count(rule["id"])
     return render_template(
-        "search_settings.html",
-        keywords=config.load_keywords(), relevant_terms=config.load_relevant_terms(),
-        blocklist_terms=config.load_blocklist_terms(),
-        lego_car_terms=config.load_lego_car_terms(),
+        "search_settings.html", rules=rules,
+        channel_promotion=db.get_setting("channel_promotion", CHANNEL_PROMOTION_DEFAULT),
+        settings=db.get_setting("schedule", {"quiet_start": "23:00", "quiet_end": "08:00",
+                                             "min_interval": 10, "timezone": "America/Sao_Paulo"}),
         enabled_stores=config.load_enabled_stores(),
         approval_expiry_hours=db.get_setting("approval_expiry_hours", 24))
 
@@ -480,10 +814,7 @@ def brand_rules():
         }, request.form.get("id", type=int))
         flash("Regra salva com sucesso", "success")
         return redirect(url_for("brand_rules"))
-    rules = db.list_brand_rules()
-    for rule in rules:
-        rule["today_count"] = db.brand_daily_count(rule["id"])
-    return render_template("brand_rules.html", rules=rules)
+    return redirect(url_for("search_settings", _anchor="brands"))
 
 
 @app.post("/brand-rules/<int:rule_id>/delete")

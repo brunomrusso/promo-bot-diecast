@@ -14,32 +14,40 @@ Bot automatizado e painel administrativo para monitorar, curar e publicar promo�
 ## Funcionalidades
 
 ### Bot de monitoramento
-- **Scraping automatizado** de Amazon BR, Mercado Livre, Lomadee e Shopee
-- **Monetização automática** dos links: Amazon (tag), ML (meli.la), Lomadee (lmdee.link)
-- **Filtros inteligentes**: desconto mínimo, relevância por termos, blocklist de produtos não-diecast
-- **Regras por marca**: desconto mínimo, modo de aprovação (auto/manual/threshold), limite diário, prioridade
+- **Catálogo fechado**: busca em Amazon BR, Mercado Livre, Lomadee e Shopee somente para produtos ativos em Minis monitoradas. Keywords amplas e alertas legados não abrem novas buscas; sem catálogo, não há scraping automático.
+- **Aprendizado silencioso**: sem alvo atingido ou histórico nacional confiável, registra preços sem gerar aprovações. Preço-alvo é opcional.
+- **Monetização automática** dos links: Amazon (tag), ML (meli.la via linkbuilder com sessão logada), Lomadee (lmdee.link)
+- **Avaliação por preço real**: coleta também preços sem desconto; compara equivalentes nacionais consultados hoje e histórico dos menores preços por dia (90 dias). Dados de origem desconhecida ou internacional não entram nessa base confiável.
+- **Fila controlada**: uma oportunidade por cadastro; melhoria acima de 1% substitui pendente. Após decisão, exige queda de pelo menos 3% para reapresentar. Até 5 entradas por ciclo e 20 pendentes. Ofertas da busca aberta são arquivadas sem rejeição humana e sem apagar preços.
+- **Filtros inteligentes**: relevância temática separada da avaliação de preço; percentual OFF informado pelo vendedor não filtra nem pontua. Bloqueio de títulos/produtos via aba Blacklist.
+- **Revisão sempre manual**: atingir o alvo ou identificar preço favorável em histórico confiável gera uma oportunidade, nunca publicação autônoma. Modos automáticos legados não são usados pelo ciclo fechado.
 - **Período silencioso**: não envia notificações de madrugada, mas continua monitorando
-- **Republicação automática**: republica se o preço caiu >15% desde a última publicação
-- **Cupons automáticos**: coleta cupons do ML e publica no canal
+- **Publicação explícita**: pelo painel, Telegram ou agenda confirmada. Criar anúncio não cadastra monitoramento automaticamente: use “Autorizar monitoramento” e salve os critérios.
+- **Cupons**: aplicação manual confirmada permanece disponível; a coleta/publicação aberta de cupons fica desativada no ciclo fechado.
 - **Anti-bot**: rotação de headers, delays aleatórios, proteção de sessão do ML com circuito de pausa
+- **Fila prioritária**: pedidos manuais (compartilhar WhatsApp, buscar) passam à frente das tarefas automáticas
 
 ### Painel administrativo (Dashboard)
 - **Visão geral** com 6 KPIs clicáveis (publicados, pendentes, monitoradas, bloqueados, alertas, agendados)
-- **Central de aprovações** com filtros, ordenação, classificação de qualidade, ações em lote e atalhos de teclado (J/K/A/R/X/C)
-- **Criar anúncio** manualmente com extração automática de dados, cupom manual e botão "Colar"
-- **Minis monitoradas** com thumbnails, histórico de preços em gráfico, busca imediata e publicação direta
-- **Alertas de preço**: marcar produto como "Caro" com preço-alvo, notificação no Telegram quando atingir
+- **Central de aprovações** com filtros recolhíveis, ordenação, classificação de qualidade (histórico monitorado **ou** aprendido), badge "Melhor de N ofertas", ações em lote e atalhos de teclado (J/K/A/R/X/C)
+- **Compartilhar no WhatsApp** sem API: fluxo guiado prepara link monetizado, copia a legenda e compartilha a foto JPEG — disponível na aprovação, no criador de anúncios e nos cards da pesquisa no histórico de minis; independente de publicar no Telegram
+- **Criar anúncio** manualmente com extração automática de dados, cupom manual e botão "Colar"; aceita links com tag de terceiros e resolve para o produto
+- **Minis monitoradas** com thumbnails, busca imediata e publicação explícita. Histórico com melhor candidata nacional indicada em destaque, alternativas recolhidas, filtros por alvo/origem e profundidade da base por dias distintos de coleta.
+- **Histórico de preços** com períodos 7/30/90 dias, mínimo/média/máximo diários, linha do alvo e edição do alvo na própria tela. “Enviar ao Telegram” e WhatsApp são ações separadas; filtrar ofertas não descarta cupons preenchidos.
+- **Alertas de preço**: alvo único na mini monitorada ("Caro" na aprovação define `max_price`); a aba Alertas é um filtro das Minis e alertas antigos aparecem como legado
 - **Blacklist** reversível de produto e termo, com sugestão automática ao rejeitar
 - **Agenda de publicações** com horário silencioso e intervalo mínimo configurável
 - **Métricas do canal**: publicações, aprovações, rejeições por marca/loja, cupons e tracking de cliques
 - **Saúde do sistema**: status por loja, memória, swap, banco, sessão do ML, auto-refresh
-- **Identidade visual** RUSSO Diecast: paleta dourada/escura, Montserrat, responsiva (mobile + desktop)
+- **Configurações centralizadas**: tema claro/escuro, texto de divulgação dos canais, regras e preferências
+- **Identidade visual** RUSSO Diecast: paleta dourada/escura, Montserrat, temas claro/escuro, ícone iPhone com fundo preto, responsiva (mobile + desktop)
 
 ### Telegram
 - Publicação formatada com imagem, preço, desconto e link de compra
 - Botões inline para aprovar/rejeitar/bloquear direto no Telegram
-- Texto para WhatsApp gerado automaticamente
+- Texto para WhatsApp gerado automaticamente ao publicar
 - Notificação pessoal quando alerta de preço dispara
+- **Todos os vereditos alimentam o aprendizado de preços**
 
 ---
 
@@ -65,38 +73,42 @@ promo-bot-carros/
 ├── main.py              # Loop principal do bot
 ├── dashboard.py         # Painel web Flask
 ├── config.py            # Configuração via .env e banco
-├── db.py                # Modelo SQLite (todas as tabelas e queries)
-├── filters.py           # Filtros de relevância e blocklist
-├── affiliate.py         # Geração e validação de links de afiliado
-├── notifier.py          # Envio para Telegram (canal + admin)
-├── approvals.py         # Callback handler para botões do Telegram
-├── manual_jobs.py       # Jobs assíncronos (extração, publicação, agenda)
-├── health.py            # Coleta de métricas de saúde do sistema
-├── backup.py            # Backup rotativo do banco
-├── keywords.txt         # Termos de busca (editável sem reiniciar)
+├── core/
+│   ├── db.py            # Modelo SQLite: tabelas, queries, aprendizado de preços
+│   ├── filters.py       # Score de relevância e identificação de produtos monitorados
+│   ├── affiliate.py     # Geração e validação de links de afiliado
+│   ├── notifier.py      # Envio para Telegram (canal + admin)
+│   ├── approvals.py     # Callback handler para botões do Telegram
+│   ├── manual_jobs.py   # Fila de jobs (extração, publicação, agenda, prioridade)
+│   ├── health.py        # Coleta de métricas de saúde do sistema
+│   └── backup.py        # Backup rotativo do banco
 ├── scrapers/
 │   ├── amazon.py        # Amazon BR via HTTP direto
 │   ├── amazon_pw.py     # Amazon via Playwright (fallback)
 │   ├── mercadolivre.py  # ML via API pública
-│   ├── mercadolivre_pw.py # ML via Playwright (busca + cupons)
-│   ├── ml_coupons.py    # Coleta de cupons do ML
+│   ├── mercadolivre_pw.py # ML via Playwright (busca de ofertas)
+│   ├── ml_coupons.py    # ML: sessão persistente, cupons e linkbuilder meli.la
 │   ├── lomadee.py       # Lomadee (rede de afiliados)
 │   ├── shopee.py        # Shopee via API interna
 │   ├── shopee_pw.py     # Shopee via Playwright
 │   └── coupons.py       # Agregador de cupons
 ├── static/
-│   ├── app.css          # Estilos (identidade RUSSO Diecast)
+│   ├── app.css          # Estilos (temas claro/escuro, identidade RUSSO Diecast)
 │   ├── approvals.js     # Lógica da central de aprovações
 │   ├── manual.js        # Lógica do criador de anúncios
-│   ├── monitored-scan.js # Busca imediata de minis
-│   └── price-chart.js   # Gráfico de histórico de preços
+│   ├── whatsapp-share.js # Compartilhamento WhatsApp (JPEG + legenda)
+│   ├── monitored-scan.js # Busca imediata e diagnóstico de minis
+│   ├── price-chart.js   # Gráfico de histórico de preços
+│   └── emblema*.png, apple-touch-icon*.png  # Identidade visual e ícones
 ├── templates/           # Templates Jinja2 (15 páginas)
 ├── deploy/
 │   ├── setup.sh         # Script de instalação no servidor
-│   ├── promobot.service # systemd: bot principal
+│   ├── promobot.service # systemd: bot principal (xvfb-run)
 │   ├── dashboard.service # systemd: painel web
 │   ├── dashboard-tunnel.service # Cloudflare Tunnel
-│   └── promobot-backup.* # Timer de backup
+│   ├── promobot-backup.* # Timer de backup
+│   ├── ml-login.sh      # Assistente de login do ML via VNC
+│   └── abrir-login-ml.cmd # Atalho Windows: túnel SSH + VNC + login ML
 └── .env.example         # Variáveis de ambiente (template)
 ```
 
@@ -205,11 +217,9 @@ Consulte [`ARCHITECTURE.md`](ARCHITECTURE.md) para diagramas e detalhes da arqui
 | `LOMADEE_APP_TOKEN` | Token Lomadee | Para Lomadee |
 | `LOMADEE_SOURCE_ID` | Source ID Lomadee | Para Lomadee |
 | `SHOPEE_AFFILIATE_ID` | ID de afiliado Shopee | Para Shopee |
-| `ML_AFFILIATE_PREFIX` | Prefixo do link ML | Para ML |
+| `ML_AFFILIATE_PREFIX` | (legado — ML usa linkbuilder com sessão logada) | Opcional |
 | `PANEL_USER` | Usuário do painel | Sim |
 | `PANEL_PASSWORD` | Senha do painel | Sim |
-| `MIN_DISCOUNT` | Desconto mínimo (%) | Padrão: 30 |
-| `AUTO_APPROVE_MIN` | Auto-aprovar acima de (%) | Padrão: 40 |
 | `CHECK_INTERVAL_MINUTES` | Intervalo entre ciclos | Padrão: 15 |
 | `ENABLED_STORES` | Lojas ativas (vírgula) | Padrão: amazon |
 | `DASHBOARD_URL` | URL pública do painel | Para tracking |

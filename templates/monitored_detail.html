@@ -2,15 +2,59 @@
 {% block title %}{{ item.name }} · RUSSO Diecast{% endblock %}
 {% block heading %}Histórico de preços{% endblock %}
 {% block content %}
-<div class="detail-title"><div><a class="back" href="{{ url_for('monitored') }}">← Minis monitoradas</a><h2>{{ item.name }}</h2><p>{{ item.required_terms }}</p></div><div class="detail-actions"><span class="pill {{ 'posted' if item.active else 'rejected' }}">{{ 'Monitorando' if item.active else 'Pausada' }}</span><button class="primary" id="scan-now">Pesquisar agora</button></div></div>
-<section class="stats price-stats">
-  <article><span>Último preço visto</span><strong>{{ ('R$ %.2f'|format(item.last_seen_price)) if item.last_seen_price else '—' }}</strong><small>{{ item.last_seen_at or 'Aguardando coleta' }}</small></article>
-  <article><span>Mínimo em 90 dias</span><strong>{{ ('R$ %.2f'|format(summary.min_price)) if summary.min_price else '—' }}</strong><small>{{ summary.observations or 0 }} observações</small></article>
-  <article><span>Média em 90 dias</span><strong>{{ ('R$ %.2f'|format(summary.avg_price)) if summary.avg_price else '—' }}</strong><small>{{ summary.products or 0 }} anúncios encontrados</small></article>
-  <article><span>Recorde histórico</span><strong>{{ ('R$ %.2f'|format(item.all_time_min)) if item.all_time_min else '—' }}</strong><small>{{ item.all_time_min_at or 'Aguardando coleta' }}</small></article>
-</section>
-<section class="panel scan-panel"><div class="panel-head"><div><small>BUSCA SOB DEMANDA</small><h2>Ofertas encontradas agora</h2></div><span id="scan-status">Clique em “Pesquisar agora” para consultar as lojas.</span></div><div id="scan-progress" class="progress hidden"><span></span><p>O bot está pesquisando nas lojas. Isso pode levar alguns minutos…</p></div><div id="scan-results" class="deal-results"></div></section>
-<section class="panel chart-panel"><div class="panel-head"><div><small>ÚLTIMOS 90 DIAS</small><h2>Evolução do preço</h2></div><span class="chart-legend"><i class="min"></i>Mínimo <i class="avg"></i>Média <i class="max"></i>Máximo</span></div>{% if daily %}<canvas id="price-chart" height="300"></canvas>{% else %}<div class="empty-state"><strong>O histórico começa agora</strong><p>O gráfico aparecerá depois que o bot encontrar esta mini nas lojas.</p></div>{% endif %}</section>
-<section class="history-grid"><div class="panel"><small>COMPARAÇÃO</small><h2>Preços por loja</h2><div class="table-wrap"><table><thead><tr><th>Loja</th><th>Mínimo</th><th>Médio</th><th>Máximo</th></tr></thead><tbody>{% for row in stores %}<tr><td><strong>{{ row.store }}</strong></td><td class="good">R$ {{ '%.2f'|format(row.min_price) }}</td><td>R$ {{ '%.2f'|format(row.avg_price) }}</td><td>R$ {{ '%.2f'|format(row.max_price) }}</td></tr>{% else %}<tr><td colspan="4" class="empty">Sem dados ainda.</td></tr>{% endfor %}</tbody></table></div></div><div class="panel"><small>ÚLTIMAS LEITURAS</small><h2>Ofertas observadas</h2><div class="observations">{% for row in recent %}<a href="{{ row.url }}" target="_blank"><div><strong>{{ row.title }}</strong><span>{{ row.store }} · {{ row.observed_at }}</span></div><b>R$ {{ '%.2f'|format(row.price) }}</b></a>{% else %}<p class="empty">Sem leituras ainda.</p>{% endfor %}</div></div></section>
+<div class="history-detail">
+  <div class="detail-title">
+    <div><a class="back" href="{{ url_for('monitored') }}">← Minis monitoradas</a><h2>{{ item.name }}</h2><p>{{ item.required_terms }}</p></div>
+    <div class="detail-actions"><span class="pill {{ 'posted' if item.active else 'rejected' }}">{{ 'Monitorando' if item.active else 'Pausada' }}</span><button class="primary" id="scan-now">Pesquisar agora</button></div>
+  </div>
+  <section class="panel history-overview">
+    <div class="history-confidence"><small>BASE DA COMPARAÇÃO</small><h2>{{ 'Histórico inicial' if history_summary.days < 5 else 'Histórico em acompanhamento' }}</h2><p>{{ history_summary.days }} dia(s) com coletas · {{ history_summary.observations }} leituras nos últimos 90 dias.</p><p class="muted">{{ 'Poucos dias de acompanhamento: um menor preço observado ainda não comprova uma boa oportunidade.' if history_summary.days < 5 else 'A comparação descreve os anúncios consultados; não garante o menor preço de todo o marketplace.' }}</p></div>
+    <form id="history-target-form" class="history-target-form">
+      <label for="history-target">Seu preço-alvo (opcional)<input id="history-target" name="max_price" type="number" min="0" step="0.01" value="{{ item.max_price if item.max_price else '' }}" placeholder="Sem alvo: aprender em silêncio"></label>
+      <div class="history-target-actions"><button class="primary" type="submit">Salvar alvo</button><button class="button" id="clear-history-target" type="button">Sem alvo</button></div>
+      <small id="target-summary">{{ ('Alvo atual: R$ %.2f'|format(item.max_price)) if item.max_price else 'Sem alvo: aprendizado silencioso até haver evidência confiável.' }}</small>
+      <p id="target-status" class="share-status" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+  <nav class="history-periods" aria-label="Período do histórico">{% for period in [7, 30, 90] %}<a class="button {{ 'active' if days == period }}" data-days="{{ period }}" href="{{ url_for('monitored_detail', item_id=item.id, days=period) }}" {% if days == period %}aria-current="page"{% endif %}>{{ period }} dias</a>{% endfor %}</nav>
+  <section class="stats price-stats">
+    <article><span>Último preço coletado</span><strong>{{ ('R$ %.2f'|format(item.last_seen_price)) if item.last_seen_price else '—' }}</strong><small>{{ (item.last_seen_at|sp_datetime) ~ ' · Brasília' if item.last_seen_at else 'Aguardando coleta' }}</small></article>
+    <article><span>Menor em {{ days }} dias</span><strong>{{ ('R$ %.2f'|format(summary.min_price)) if summary.min_price else '—' }}</strong><small>{{ summary.observations }} leituras em {{ summary.days }} dia(s)</small></article>
+    <article><span>Média das coletas em {{ days }} dias</span><strong>{{ ('R$ %.2f'|format(summary.avg_price)) if summary.avg_price else '—' }}</strong><small>{{ summary.products }} anúncios consultados</small></article>
+    <article><span>Menor já registrado</span><strong>{{ ('R$ %.2f'|format(item.all_time_min)) if item.all_time_min else '—' }}</strong><small>{{ (item.all_time_min_at|sp_datetime) ~ ' · Brasília' if item.all_time_min_at else 'Aguardando coleta' }}</small></article>
+  </section>
+  <section class="panel scan-panel">
+    <div class="panel-head"><div><small>COMPARAÇÃO ATUAL</small><h2>Ofertas encontradas</h2></div><span id="scan-status">Clique em “Pesquisar agora” para consultar as lojas.</span></div>
+    <div id="scan-progress" class="progress hidden"><span></span><p>O bot está pesquisando nas lojas. Isso pode levar alguns minutos…</p></div>
+    <p class="muted">Preços públicos, sem frete, cupom ou eventuais taxas. Confira vendedor, variação, origem e checkout antes de divulgar.</p>
+    <div class="history-filters" role="group" aria-label="Filtrar ofertas">
+      <button type="button" class="button active" data-offer-filter="all" aria-pressed="true">Todas</button>
+      <button type="button" class="button" data-offer-filter="target" aria-pressed="false" {{ 'disabled' if not item.max_price }} title="Defina um alvo para filtrar">Dentro do alvo</button>
+      <button type="button" class="button" data-offer-filter="national" aria-pressed="false">Nacionais</button>
+      <button type="button" class="button" data-offer-filter="unknown" aria-pressed="false">Origem não confirmada</button>
+    </div>
+    <p id="offer-filter-status" class="muted" role="status" aria-live="polite"></p>
+    <p id="featured-note" class="history-featured-note"></p>
+    <div id="scan-featured" class="deal-results featured-results" hidden></div>
+    <details id="scan-alternatives" class="scan-alternatives" hidden><summary class="button" id="alternatives-label">Ver outras ofertas</summary><div id="scan-results" class="deal-results"></div></details>
+    <div id="scan-empty" class="empty-state" hidden></div>
+    <details class="history-diagnostics"><summary>Diagnóstico e critérios da busca</summary><div id="scan-diagnostics" class="scan-diagnostics"></div></details>
+  </section>
+  <section class="panel chart-panel">
+    <div class="panel-head"><div><small>ÚLTIMOS {{ days }} DIAS</small><h2>Evolução do preço</h2></div><span class="chart-legend"><i class="min"></i>Mínimo <i class="avg"></i>Média <i class="max"></i>Máximo <span id="target-legend" {{ 'hidden' if not item.max_price }}><i class="target"></i>Seu alvo</span></span></div>
+    <p class="muted">Cada ponto resume um dia de coleta: menor, média e maior preço dos anúncios observados. Dias sem coleta não criam novas leituras. A linha tracejada representa seu alvo.</p>
+    <canvas id="price-chart" height="300" role="img" aria-label="Preços diários observados e preço-alvo nos últimos {{ days }} dias" {{ 'hidden' if not daily }}></canvas>
+    {% if not daily %}<div class="empty-state"><strong>Sem coletas neste período</strong><p>Selecione outro período ou faça uma pesquisa do produto.</p></div>{% endif %}
+  </section>
+  <section class="history-grid">
+    <div class="panel"><small>COMPARAÇÃO EM {{ days }} DIAS</small><h2>Preços por loja</h2><div class="table-wrap"><table><thead><tr><th>Loja</th><th>Mínimo</th><th>Média das coletas</th><th>Máximo</th></tr></thead><tbody>{% for row in stores %}<tr><td><strong>{{ row.store }}</strong></td><td class="good">R$ {{ '%.2f'|format(row.min_price) }}</td><td>R$ {{ '%.2f'|format(row.avg_price) }}</td><td>R$ {{ '%.2f'|format(row.max_price) }}</td></tr>{% else %}<tr><td colspan="4" class="empty">Sem dados neste período.</td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="panel"><small>ÚLTIMAS LEITURAS · TODOS OS PERÍODOS</small><h2>Ofertas observadas</h2><p>Marque anúncios de outro modelo para corrigir apenas esta mini e seus cálculos.</p><div class="observations">{% for row in recent %}<article class="observation-row">{% if row.image %}<a class="observation-photo" href="{{ row.image }}" target="_blank" rel="noopener noreferrer"><img src="{{ row.image }}" loading="lazy" alt="{{ row.title }}" width="72" height="72"></a>{% endif %}<div class="observation-info"><a href="{{ row.url }}" target="_blank" rel="noopener noreferrer"><strong>{{ row.title }}</strong></a><span>{{ row.store }} · {{ row.observed_at|sp_datetime }} · Brasília</span><b>R$ {{ '%.2f'|format(row.price) }}</b><form method="post" action="{{ url_for('curate_monitored_observation', item_id=item.id, observation_id=row.id) }}"><input type="hidden" name="action" value="exclude"><button class="observation-dismiss" title="Não é esta mini — desconsiderar anúncio" aria-label="Não é esta mini — desconsiderar anúncio" onclick="return confirm('Desconsiderar todas as leituras deste anúncio apenas nesta mini? Você poderá desfazer.')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m6.3 6.3 11.4 11.4"/></svg></button></form></div></article>{% else %}<p class="empty">Sem leituras válidas ainda.</p>{% endfor %}</div><details><summary class="button">Anúncios desconsiderados ({{ excluded|length }})</summary>{% for row in excluded %}<article class="observation-row">{% if row.image %}<img src="{{ row.image }}" loading="lazy" alt="{{ row.title }}" width="72" height="72">{% endif %}<div class="observation-info"><strong>{{ row.title }}</strong><span>{{ row.store }}</span><form method="post" action="{{ url_for('curate_monitored_observation', item_id=item.id, observation_id=row.id) }}"><input type="hidden" name="action" value="restore"><button class="button">Desfazer exclusão</button></form></div></article>{% endfor %}</details></div>
+  </section>
+</div>
 {% endblock %}
-{% block scripts %}<script>window.monitoredItemId={{ item.id }};window.autoScan={{ (request.args.get('scan') == '1')|tojson }};</script><script src="{{ url_for('static', filename='monitored-scan.js') }}"></script>{% if daily %}<script>window.priceHistory={{ daily|tojson }};</script><script src="{{ url_for('static', filename='price-chart.js') }}"></script>{% endif %}{% endblock %}
+{% block scripts %}
+<script>window.monitoredItemId={{ item.id }};window.monitoredTarget={{ item.max_price|tojson }};window.monitoredHistorySummary={{ history_summary|tojson }};window.lastMonitoredScan={{ last_scan|tojson }};window.priceHistory={{ daily|tojson }};window.autoScan={{ (request.args.get('scan') == '1')|tojson }};</script>
+<script src="{{ url_for('static', filename='whatsapp-share.js', v='manual-v1') }}"></script>
+<script src="{{ url_for('static', filename='monitored-scan.js', v='sp-time-v5') }}"></script>
+<script src="{{ url_for('static', filename='price-chart.js', v='target-periods-v2') }}"></script>
+{% endblock %}

@@ -1,25 +1,114 @@
 {% extends 'base.html' %}
 {% block title %}Minis monitoradas · RUSSO Diecast{% endblock %}
 {% block heading %}Minis monitoradas{% endblock %}
+{% macro money(value) %}R$ {{ ('%.2f'|format(value)).replace('.', ',') }}{% endmacro %}
 {% block content %}
 <section class="split">
-  <form class="panel form-grid" method="post">
-    <input type="hidden" name="observed_price" value="{{ request.args.get('observed_price', '') }}"><input type="hidden" name="product_id" value="{{ request.args.get('product_id', '') }}"><input type="hidden" name="store" value="{{ request.args.get('store', '') }}"><input type="hidden" name="source_url" value="{{ request.args.get('url', '') }}"><input type="hidden" name="image" value="{{ request.args.get('image', '') }}">
-    <div class="wide"><small>NOVO MONITORAMENTO</small><h2>Cadastrar mini desejada</h2><p>O bot registra os preços encontrados e publica automaticamente quando estiver dentro do limite.</p></div>
-    <label class="wide">Nome para identificação<input name="name" value="{{ request.args.get('name', '') }}" placeholder="Mini GT Nissan Skyline R34" required></label>
-    <label class="wide">Termo usado na busca<input name="search_terms" value="{{ request.args.get('search_terms', '') }}" placeholder="mini gt skyline r34" required></label>
-    <label class="wide">Termos obrigatórios, separados por vírgula<input name="required_terms" value="{{ request.args.get('required_terms', '') }}" placeholder="mini gt, skyline, r34" required></label>
-    <label>Preço máximo (R$)<input name="max_price" value="{{ request.args.get('max_price', '') }}" type="number" min="0" step="0.01" required></label>
-    <label class="check"><input name="active" type="checkbox" checked> Ativo</label>
-    <button class="primary wide" type="submit">Salvar monitoramento</button>
+  <form class="panel form-grid monitored-create {{ 'create-open' if request.args.get('name') or request.args.get('observed_price') }}" method="post">
+    <button type="button" class="button wide monitored-create-toggle" aria-expanded="{{ 'true' if request.args.get('name') or request.args.get('observed_price') else 'false' }}" aria-controls="monitored-create-fields" onclick="const form=this.closest('form'),open=form.classList.toggle('create-open');this.setAttribute('aria-expanded',String(open))"><span>Cadastrar mini</span><span class="create-chevron" aria-hidden="true">⌄</span></button>
+    <div class="monitored-create-fields" id="monitored-create-fields">
+      <input type="hidden" name="observed_price" value="{{ request.args.get('observed_price', '') }}"><input type="hidden" name="product_id" value="{{ request.args.get('product_id', '') }}"><input type="hidden" name="store" value="{{ request.args.get('store', '') }}"><input type="hidden" name="source_url" value="{{ request.args.get('url', '') }}"><input type="hidden" name="image" value="{{ request.args.get('image', '') }}">
+      <div class="wide"><small>NOVO MONITORAMENTO</small><h2>Cadastrar mini desejada</h2><p>Somente produtos deste catálogo ativo são pesquisados. O bot aprende em silêncio e envia uma oportunidade para revisão ao atingir seu alvo ou identificar preço bom com histórico confiável. Não publica automaticamente.</p></div>
+      <label class="wide">Nome para identificação<input name="name" value="{{ request.args.get('name', '') }}" placeholder="Mini GT Nissan Skyline R34" required></label>
+      <label class="wide">Termo usado na busca (use ; para buscas alternativas)<input name="search_terms" value="{{ request.args.get('search_terms', '') }}" placeholder="mini gt skyline r34; nissan skyline r34 mini gt" required></label>
+      <label class="wide">Termos obrigatórios, separados por vírgula<input name="required_terms" value="{{ request.args.get('required_terms', '') }}" placeholder="mini gt, skyline, r34" required></label>
+      <label class="wide">Tags<input name="tags" class="mini-tags-input" autocomplete="off" placeholder="Ex.: boulevard, japoneses, favoritos"><small>Clique nas sugestões ou digite uma nova tag e pressione Enter.</small></label>
+      <label>Preço-alvo opcional (R$)<input name="max_price" value="{{ request.args.get('max_price', '') }}" type="number" min="0" step="0.01" placeholder="Sem alvo: aprender em silêncio"></label>
+      <label class="check"><input name="active" type="checkbox" checked> Ativo</label>
+      <button class="primary wide" type="submit">Salvar monitoramento</button>
+    </div>
   </form>
-  <section class="panel"><small>DICIONÁRIO</small><h2>{{ items|length }} minis cadastradas</h2><div class="cards">
+  <section class="panel monitored-list">
+    <small>MINIS MONITORADAS</small><h2>{{ items|length }} {{ 'mini' if items|length == 1 else 'minis' }}{% if active_filter == 'all' %} {{ 'cadastrada' if items|length == 1 else 'cadastradas' }}{% endif %}</h2>
+    <form method="get" class="mini-tag-filter"><input type="hidden" name="f" value="{{ active_filter }}"><label for="mini-tag-filter">Buscar por tag<input id="mini-tag-filter" name="tag" list="mini-tag-options" value="{{ selected_tag }}" placeholder="Escolha ou digite uma tag" autocomplete="off"></label><datalist id="mini-tag-options">{% for tag in tags %}<option value="{{ tag }}">{% endfor %}</datalist><button class="button">Filtrar</button>{% if selected_tag %}<a class="button" href="{{ url_for('monitored', f=active_filter) }}">Limpar tag</a>{% endif %}</form>
+    <nav class="monitored-filters" aria-label="Filtrar minis">
+      <a class="filter-chip {{ 'active' if active_filter == 'all' }}" href="{{ url_for('monitored', tag=selected_tag) }}">Todas · {{ counts.all }}</a>
+      <a class="filter-chip {{ 'active' if active_filter == 'atingido' }}" href="{{ url_for('monitored', tag=selected_tag, f='atingido') }}">Alvo atingido · {{ counts.atingido }}</a>
+      <a class="filter-chip {{ 'active' if active_filter == 'alvo' }}" href="{{ url_for('monitored', tag=selected_tag, f='alvo') }}">Com alvo · {{ counts.alvo }}</a>
+      <a class="filter-chip {{ 'active' if active_filter == 'aprendendo' }}" href="{{ url_for('monitored', tag=selected_tag, f='aprendendo') }}">Aprendendo · {{ counts.aprendendo }}</a>
+      <a class="filter-chip {{ 'active' if active_filter == 'pausadas' }}" href="{{ url_for('monitored', tag=selected_tag, f='pausadas') }}">Pausadas · {{ counts.pausadas }}</a>
+    </nav>
+    <div class="cards">
     {% for item in items %}
-    <article class="mini-card mini-card-v2">
-      <div class="mini-left">{% if item.image %}<img class="mini-thumb" src="{{ item.image }}" alt="{{ item.name }}" loading="lazy">{% endif %}<div class="mini-text"><div class="deal-badges"><span class="pill {{ 'posted' if item.active else 'rejected' }}">{{ 'Ativa' if item.active else 'Pausada' }}</span>{% if item.is_opportunity %}<span class="quality-badge quality-record">Oportunidade</span>{% endif %}{% if item.trend == 'down' %}<span class="quality-badge quality-excellent">↓ {{ item.trend_pct }}%</span>{% elif item.trend == 'up' %}<span class="quality-badge quality-expensive">↑ +{{ item.trend_pct }}%</span>{% elif item.trend == 'stable' %}<span class="quality-badge quality-normal">→ estável</span>{% endif %}</div><h3>{{ item.name }}</h3><p>Busca: <strong>{{ item.search_terms }}</strong></p>{% if item.last_seen_price %}<p>Último: <strong>R$ {{ '%.2f'|format(item.last_seen_price) }}</strong>{% if item.avg_90d %} · Média 90d: R$ {{ '%.2f'|format(item.avg_90d) }}{% endif %}</p>{% endif %}{% if item.best_store %}<p>Melhor agora: <strong>{{ item.best_store.store }}</strong> R$ {{ '%.2f'|format(item.best_store.min_price) }}</p>{% endif %}</div></div>
-      <div class="mini-right"><strong class="target">≤ R$ {{ '%.2f'|format(item.max_price) }}</strong><div class="mini-btns"><a class="primary mini-btn" href="{{ url_for('monitored_detail', item_id=item.id, scan=1) }}">Pesquisar</a><a class="button mini-btn" href="{{ url_for('monitored_detail', item_id=item.id) }}">Histórico</a></div><div class="mini-btns"><details class="mini-edit-wrap"><summary class="button mini-btn">Editar</summary><form class="edit-mini" method="post"><input type="hidden" name="id" value="{{ item.id }}"><label>Nome<input name="name" value="{{ item.name }}" required></label><label>Busca<input name="search_terms" value="{{ item.search_terms }}" required></label><label>Termos obrigatórios<input name="required_terms" value="{{ item.required_terms }}" required></label><label>Preço máximo<input name="max_price" type="number" step="0.01" value="{{ item.max_price }}" required></label><label class="check"><input name="active" type="checkbox" {{ 'checked' if item.active }}> Ativo</label><button class="primary">Salvar</button></form></details><form method="post" action="{{ url_for('monitored_delete', item_id=item.id) }}" class="delete-form"><button class="button mini-btn mini-btn-danger" type="submit" onclick="return confirm('Excluir esta mini?')">Excluir</button></form></div></div>
-    </article>
-    {% else %}<p class="empty">Cadastre a primeira mini ao lado.</p>{% endfor %}
-  </div></section>
+      <article class="mini-card monitored-card">
+        <div class="monitored-card-top">
+          <div class="deal-badges">
+            <span class="monitored-state {{ {'target_hit':'hit','paused':'paused','learning':'learning'}.get(item.state,'active') }}">{{ {'target_hit':'Alvo atingido','watching':'Com alvo','learning':'Aprendendo','paused':'Pausada'}[item.state] }}</span>
+            {% if item.is_opportunity %}<span class="quality-badge quality-record">Oportunidade</span>{% endif %}
+            {% if item.trend == 'down' %}<span class="quality-badge quality-excellent">↓ {{ item.trend_pct }}%</span>{% elif item.trend == 'up' %}<span class="quality-badge quality-expensive">↑ +{{ item.trend_pct }}%</span>{% elif item.trend == 'stable' %}<span class="quality-badge quality-normal">→ estável</span>{% endif %}
+          </div>
+          <details class="monitored-menu">
+            <summary class="button" aria-label="Ações para {{ item.name }}" title="Ações da mini"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></summary>
+            <div class="monitored-menu-options">
+              <button type="button" class="button" data-edit-mini aria-controls="edit-mini-{{ item.id }}" aria-expanded="false">Editar mini</button>
+              <form method="post" action="{{ url_for('monitored_toggle', item_id=item.id) }}"><input type="hidden" name="active" value="{{ 0 if item.active else 1 }}"><button class="button">{{ 'Pausar monitoramento' if item.active else 'Retomar monitoramento' }}</button></form>
+              <form method="post" action="{{ url_for('monitored_delete', item_id=item.id) }}"><button class="button monitored-delete" onclick="return confirm('Excluir esta mini?')">Excluir mini</button></form>
+            </div>
+          </details>
+        </div>
+        <div class="monitored-identity">
+          {% if item.image %}<img class="monitored-thumb" src="{{ item.image }}" alt="{{ item.name }}" loading="lazy">{% else %}<span class="monitored-thumb monitored-no-photo" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m5 10 2-5h10l2 5M3 10h18v8H3zM7 18v2M17 18v2M6 14h2M16 14h2"/></svg></span>{% endif %}
+          <div><h3>{{ item.name }}</h3><p>{{ 'Preço coletado' if item.last_seen_at else 'Aguardando primeira coleta' }}{% if item.last_seen_at %} <span data-time="{{ item.last_seen_at }}">{{ item.last_seen_at }}</span>{% endif %}</p>{% if item.tags %}<div class="mini-tag-badges" aria-label="Tags da mini">{% for tag in item.tags %}<a class="mini-tag" href="{{ url_for('monitored', tag=tag, f=active_filter) }}">{{ tag }}</a>{% endfor %}</div>{% endif %}</div>
+        </div>
+        <div class="monitored-prices">
+          <div><small>Último visto</small><strong>{{ money(item.last_seen_price) if item.last_seen_price else '—' }}</strong></div>
+          <div><small>Menor em 7 dias</small><strong class="monitored-best">{{ money(item.best_store.min_price) if item.best_store else '—' }}</strong></div>
+          <div><small>Média 90 dias</small><strong>{{ money(item.avg_90d) if item.avg_90d else '—' }}</strong></div>
+        </div>
+        <div class="monitored-target"><span>{{ 'Seu preço-alvo' if item.max_price else 'Sem preço-alvo definido' }}</span><strong>{{ 'Até ' ~ money(item.max_price) if item.max_price else 'Aprendizado silencioso' }}</strong></div>
+        <div class="monitored-actions">
+          <a class="primary" href="{{ url_for('monitored_detail', item_id=item.id, scan=1) }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>Pesquisar</a>
+          <a class="button" href="{{ url_for('monitored_detail', item_id=item.id) }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11a9 9 0 119 10M3 4v7h7M12 7v5l3 2"/></svg>Histórico</a>
+        </div>
+        <details class="monitored-criteria"><summary>Critérios da busca</summary><p><b>Busca:</b> {{ item.search_terms }}</p><p><b>Exige:</b> {{ item.required_terms }}</p>{% if item.best_store %}<p><b>Menor preço coletado em 7 dias:</b> {{ item.best_store.store }} · {{ money(item.best_store.min_price) }}</p>{% endif %}</details>
+        <form class="form-grid monitored-edit" id="edit-mini-{{ item.id }}" method="post" hidden>
+          <input type="hidden" name="id" value="{{ item.id }}">
+          <label class="wide">Nome<input name="name" value="{{ item.name }}" required></label>
+          <label class="wide">Busca (use ; para alternativas)<input name="search_terms" value="{{ item.search_terms }}" required></label>
+          <label class="wide">Termos obrigatórios<input name="required_terms" value="{{ item.required_terms }}" required></label>
+          <label class="wide">Tags<input name="tags" class="mini-tags-input" autocomplete="off" value="{{ item.tags|join(', ') }}" placeholder="Separe por vírgula"><small>Digite para escolher uma tag existente ou criar outra.</small></label>
+          <label>Preço-alvo opcional<input name="max_price" type="number" min="0" step="0.01" value="{{ item.max_price if item.max_price else '' }}" placeholder="Sem alvo: aprender em silêncio"></label>
+          <label class="check"><input name="active" type="checkbox" {{ 'checked' if item.active }}> Ativo</label>
+          <button class="primary">Salvar</button><button type="button" class="button" data-cancel-mini>Cancelar</button>
+        </form>
+      </article>
+    {% else %}<p class="empty">{{ 'Nenhuma mini neste filtro.' if active_filter != 'all' else 'Use “Cadastrar mini” para iniciar um monitoramento.' }}</p>{% endfor %}
+    </div>
+    {% if legacy_alerts %}
+    <details class="legacy-alerts">
+      <summary>Alertas antigos ({{ legacy_alerts|length }}) — cadastre a mini correspondente para monitorar de verdade</summary>
+      {% for alert in legacy_alerts %}
+      <div class="legacy-alert-row">
+        {% if alert.image %}<img class="monitored-thumb" src="{{ alert.image }}" alt="{{ alert.title }}" loading="lazy">{% endif %}
+        <div class="legacy-alert-info"><strong>{{ alert.title }}{% if alert.duplicates > 1 %} <span class="quality-badge quality-normal">×{{ alert.duplicates }} repetições</span>{% endif %}</strong><small>{{ alert.store }} · visto a {{ money(alert.current_price) }} · alvo {{ money(alert.target_price) }}</small></div>
+        <a class="button mini-btn" href="{{ url_for('monitored', name=alert.title, search_terms=alert.search_hint, required_terms=alert.search_hint, max_price=alert.target_price, image=alert.image or '') }}" title="Cadastrar como mini monitorada (revisar termos antes de salvar)">Monitorar</a>
+        <form method="post" action="{{ url_for('price_alert_delete', alert_id=alert.id) }}"><button class="button mini-btn mini-btn-danger" onclick="return confirm('Remover este alerta antigo?')">Remover</button></form>
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
+  </section>
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+const existingMiniTags={{ tags|tojson }};
+document.querySelectorAll('.mini-tags-input').forEach(input=>{
+  const normalize=value=>value.trim().replace(/\s+/g,' ').toLocaleLowerCase('pt-BR');
+  let selected=[...new Set(input.value.split(/[,;]+/).map(normalize).filter(Boolean))];
+  const widget=document.createElement('div'),chips=document.createElement('div'),entry=document.createElement('input'),suggestions=document.createElement('div');
+  widget.className='mini-tag-editor';chips.className='mini-tag-selected';suggestions.className='mini-tag-suggestions';entry.className='mini-tag-entry';entry.type='text';entry.autocomplete='off';entry.placeholder='Digite ou escolha uma tag';entry.setAttribute('aria-label','Adicionar tag');
+  input.type='hidden';input.after(widget);widget.append(chips,entry,suggestions);
+  function add(value){const tags=value.split(/[,;]+/).map(normalize).filter(Boolean);for(const tag of tags){if(tag.length>50||(!selected.includes(tag)&&selected.length>=20)){entry.setCustomValidity('Use até 20 tags, com até 50 caracteres cada.');entry.reportValidity();return false}if(!selected.includes(tag))selected.push(tag)}entry.setCustomValidity('');entry.value='';render();return true}
+  function suggest(){suggestions.replaceChildren();const query=normalize(entry.value);const matches=existingMiniTags.filter(tag=>!selected.includes(tag)&&tag.includes(query)).slice(0,12);for(const tag of matches){const button=document.createElement('button');button.type='button';button.className='mini-tag-choice';button.textContent=tag;button.addEventListener('click',()=>{add(tag);entry.focus()});suggestions.append(button)}if(query&&!selected.includes(query)&&!existingMiniTags.includes(query)){const create=document.createElement('button');create.type='button';create.className='mini-tag-choice';create.textContent='Criar “'+entry.value.trim()+'”';create.addEventListener('click',()=>{add(entry.value);entry.focus()});suggestions.append(create)}}
+  function render(){input.value=selected.join(', ');chips.replaceChildren();for(const tag of selected){const chip=document.createElement('span'),remove=document.createElement('button');chip.className='mini-tag-selected-chip';chip.append(document.createTextNode(tag));remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remover tag '+tag);remove.addEventListener('click',()=>{selected=selected.filter(t=>t!==tag);render();entry.focus()});chip.append(remove);chips.append(chip)}suggest()}
+  entry.addEventListener('input',()=>{entry.setCustomValidity('');suggest()});entry.addEventListener('focus',suggest);entry.addEventListener('keydown',event=>{if(['Enter',',',';'].includes(event.key)){event.preventDefault();add(entry.value)}else if(event.key==='Escape'){suggestions.replaceChildren()}});
+  entry.addEventListener('blur',()=>{setTimeout(()=>{if(!widget.contains(document.activeElement)&&entry.value.trim())add(entry.value)},150)});
+  input.form.addEventListener('submit',event=>{if(entry.value.trim()&&!add(entry.value))event.preventDefault()});render();
+});
+document.querySelectorAll('[data-edit-mini]').forEach(button=>button.addEventListener('click',()=>{const form=document.getElementById(button.getAttribute('aria-controls'));form.hidden=false;button.setAttribute('aria-expanded','true');button.closest('details').removeAttribute('open');form.querySelector('input[name="name"]').focus()}));
+document.querySelectorAll('[data-cancel-mini]').forEach(button=>button.addEventListener('click',()=>{const form=button.closest('form');form.hidden=true;const toggle=form.closest('.monitored-card').querySelector('[data-edit-mini]');toggle.setAttribute('aria-expanded','false');form.closest('.monitored-card').querySelector('.monitored-menu>summary').focus()}));
+document.addEventListener('click',event=>document.querySelectorAll('.monitored-menu[open]').forEach(menu=>{if(!menu.contains(event.target))menu.removeAttribute('open')}));
+document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelectorAll('.monitored-menu[open]').forEach(menu=>{menu.removeAttribute('open');menu.querySelector('summary').focus()})});
+</script>
 {% endblock %}

@@ -1,17 +1,20 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import config
 
 
 def is_monetized(url: str, store: str) -> bool:
     """Confere se o link final realmente gera comissão."""
-    if "meli.la" in url or "lmdee.link" in url:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or parsed.username or parsed.password:
+        return False
+    if host in {"meli.la", "lmdee.link"}:
         return True
-    if store == "Amazon" and config.AMAZON_TAG \
-            and f"tag={config.AMAZON_TAG}" in url:
-        return True
-    return False
+    return bool(store == "Amazon" and config.AMAZON_TAG
+                and (host == "amazon.com.br" or host.endswith(".amazon.com.br"))
+                and config.AMAZON_TAG in parse_qs(parsed.query).get("tag", []))
 
 
 def _clean_amazon_url(url: str) -> str:
@@ -27,7 +30,36 @@ def _clean_amazon_url(url: str) -> str:
     return url
 
 
+def cached_affiliate_url(deal: dict) -> str:
+    from core import db
+
+    store, url = deal["store"], deal["url"]
+    link = db.cached_affiliate_link(store, url)
+    if link and is_monetized(link, store):
+        return link
+    if is_monetized(url, store):
+        return url
+    if store == "Amazon":
+        link = _generate_affiliate_url(deal)
+        if is_monetized(link, store):
+            db.cache_affiliate_link(store, url, link)
+            return link
+    return ""
+
+
 def to_affiliate_url(deal: dict) -> str:
+    from core import db
+
+    cached = cached_affiliate_url(deal)
+    if cached:
+        return cached
+    link = _generate_affiliate_url(deal)
+    if is_monetized(link, deal["store"]):
+        db.cache_affiliate_link(deal["store"], deal["url"], link)
+    return link
+
+
+def _generate_affiliate_url(deal: dict) -> str:
     """Converte a URL do produto em link de afiliado, conforme credenciais
     configuradas no .env. Sem credencial, retorna a URL original."""
     url = deal["url"]

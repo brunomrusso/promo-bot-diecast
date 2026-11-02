@@ -51,8 +51,30 @@ def _services():
     return result
 
 
+def _alerts(states, bot_online):
+    alerts = []
+    if not bot_online:
+        alerts.append({"level": "critical",
+                       "text": "Bot sem heartbeat — buscas e aprovações paradas."})
+    session = states.get("ml_session", {}).get("value", {})
+    if session.get("status") == "verification_required":
+        retry = session.get("retry_at", "")
+        alerts.append({
+            "level": "warn",
+            "text": "Mercado Livre bloqueado por verificação/anti-bot "
+                    f"(nova tentativa {retry.replace('T', ' ') if retry else 'em breve'}). "
+                    "As demais lojas seguem operando."})
+    for store in db.list_store_health():
+        if store.get("status") == "blocked":
+            alerts.append({"level": "warn",
+                           "text": f"Loja {store['store']} bloqueada: "
+                                   f"{store.get('error') or 'sem detalhe'}"})
+    return alerts
+
+
 def bot_indicator():
-    heartbeat = db.get_system_state().get("heartbeat")
+    states = db.get_system_state()
+    heartbeat = states.get("heartbeat")
     age = None
     if heartbeat:
         try:
@@ -60,9 +82,11 @@ def bot_indicator():
                 heartbeat["updated_at"])).total_seconds()
         except ValueError:
             pass
-    return {"online": age is not None and age < 180,
+    online = age is not None and age < 180
+    return {"online": online,
             "age": round(age) if age is not None else None,
-            "phase": heartbeat["value"].get("phase") if heartbeat else None}
+            "phase": heartbeat["value"].get("phase") if heartbeat else None,
+            "alerts": _alerts(states, online)}
 
 
 def snapshot():
@@ -95,7 +119,8 @@ def snapshot():
                  "free": _bytes(disk.free), "percent": round(disk.used / disk.total * 100)},
         "database_size": _bytes(db_size), "services": _services(),
         "uptime_hours": round(uptime / 3600, 1) if uptime is not None else None,
-        "load": load, "backup": backup_info, "audit": db.job_audit(), "ml_profile": {
+        "load": load, "backup": backup_info, "audit": db.job_audit(),
+        "alerts": indicator["alerts"], "ml_profile": {
             "exists": profile.exists(),
             "updated_at": datetime.fromtimestamp(profile.stat().st_mtime).isoformat(
                 sep=" ", timespec="seconds") if profile.exists() else None,

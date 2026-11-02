@@ -35,13 +35,16 @@ def _handle_callback(cb: dict):
     elif action == "bp":
         db.add_blacklist("product", pid, title)
         db.set_status(pid, "blacklisted")
+        db.record_verdict(pid, "rejected")
         answer = "produto bloqueado 🚫"
     elif action == "bt":
         db.add_blacklist("term", title, title)
         db.set_status(pid, "blacklisted")
+        db.record_verdict(pid, "rejected")
         answer = "título bloqueado 🚫"
     else:
         db.set_status(pid, "rejected")
+        db.record_verdict(pid, "rejected")
         answer = "ignorado ❌"
     _post("answerCallbackQuery", {"callback_query_id": qid, "text": answer})
     if msg.get("message_id"):
