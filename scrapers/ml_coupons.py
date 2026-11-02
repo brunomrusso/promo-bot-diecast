@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import config
 from core import db
 from playwright.sync_api import sync_playwright
 
@@ -33,13 +34,26 @@ def ml_available():
 
 
 def mark_ml_verification(url=""):
+    previous = ml_session_state()
+    new_episode = (previous.get("status") != "verification_required"
+                   or not previous.get("alerted"))
     db.set_system_state("ml_session", {
         "status": "verification_required",
         "message": "Mercado Livre requer verificação manual",
         "url": url,
+        "alerted": True,
         "retry_at": (datetime.utcnow() + timedelta(hours=2)).isoformat(timespec="seconds"),
     })
     db.update_store_health("Mercado Livre", "blocked", error="Verificação manual necessária")
+    if new_episode:
+        try:
+            from core import notifier
+            notifier.notify_admin(
+                "⚠️ Mercado Livre bloqueado por verificação/anti-bot. "
+                "Buscas no ML pausadas; demais lojas seguem. Verifique Saúde no painel."
+            )
+        except Exception as e:
+            print(f"[ML] falha ao notificar bloqueio: {e}")
 
 
 def mark_ml_ready():
@@ -53,7 +67,9 @@ def is_ml_verification(page):
         body = page.inner_text("body")[:4000].lower()
         return ("captcha" in url or "wall/logged" in url
                 or "account-verification" in url or "segurança" in title
-                or "verificação" in body or "captcha" in body)
+                or "verificação" in body or "captcha" in body
+                or "hubo un error" in body or "error accediendo" in body
+                or "houve um erro" in body)
     except Exception:
         return False
 
@@ -64,15 +80,18 @@ def _get_context():
     if _ctx is None:
         _pw = sync_playwright().start()
         PROFILE_DIR.mkdir(exist_ok=True)
+        proxy = config.ml_playwright_proxy()
+        if proxy:
+            print(f"[ML] usando proxy {proxy['server']}")
         try:
             _ctx = _pw.chromium.launch_persistent_context(
                 str(PROFILE_DIR), channel="chrome",
-                headless=False, args=_args, locale="pt-BR",
+                headless=False, args=_args, locale="pt-BR", proxy=proxy,
             )
         except Exception:
             _ctx = _pw.chromium.launch_persistent_context(
                 str(PROFILE_DIR), headless=False, args=_args,
-                locale="pt-BR",
+                locale="pt-BR", proxy=proxy,
             )
     return _ctx
 
@@ -195,10 +214,11 @@ def ml_affiliate_link(product_url: str) -> str:
         )
         page.close()
         if links:
-            _link_cache[product_url] = links[0]
-            return links[0]
+            link = links[0]
+            _link_cache[product_url] = link
+            db.cache_affiliate_link("Mercado Livre", product_url, link)
+            return link
         print(f"[ML-link] falha ao gerar link p/ {product_url[:60]}")
     except Exception as e:
         print(f"[ML-link] erro: {e}")
-    _link_cache[product_url] = product_url
     return product_url

@@ -1,7 +1,38 @@
 import re
+import time
 from urllib.parse import quote
 
-from .ml_coupons import _get_context
+from playwright.sync_api import sync_playwright
+
+from .ml_coupons import _args
+
+_ctx = None
+_browser = None
+_pw = None
+
+
+def _get_context():
+    """Contexto próprio, sem proxy: a Amazon responde melhor no IP direto
+    da VM do que pelo proxy residencial usado pelo ML."""
+    global _pw, _browser, _ctx
+    if _ctx is None:
+        _pw = sync_playwright().start()
+        try:
+            _browser = _pw.chromium.launch(
+                channel="chrome", headless=False, args=_args)
+        except Exception:
+            _browser = _pw.chromium.launch(headless=False, args=_args)
+        _ctx = _browser.new_context(locale="pt-BR")
+    return _ctx
+
+
+def close_context():
+    global _pw, _browser, _ctx
+    if _ctx:
+        _ctx.close()
+        _browser.close()
+        _pw.stop()
+        _ctx = _browser = _pw = None
 
 
 def _to_float(text: str):
@@ -12,29 +43,51 @@ def _to_float(text: str):
         return None
 
 
+def _blocked(page) -> bool:
+    try:
+        content = page.content().lower()
+        if "captcha" in content:
+            return True
+        body = page.inner_text("body")[:2000].lower()
+        return "robot" in body or "captcha" in body
+    except Exception:
+        return False
+
+
 def search_amazon(keyword: str, min_discount: int):
-    """Scraping da Amazon BR via Chrome real (sessão persistente)."""
+    """Scraping da Amazon BR via Chrome real, conexão direta (sem proxy)."""
     url = f"https://www.amazon.com.br/s?k={quote(keyword)}"
     deals = []
     seen = set()
-    try:
-        ctx = _get_context()
+    ctx = _get_context()
+    loaded = False
+    for attempt in range(2):
         page = ctx.new_page()
         try:
-            page.goto(url, timeout=45000)
+            page.goto(url, timeout=45000, wait_until="domcontentloaded")
             page.wait_for_selector(
                 "div[data-asin][data-component-type='s-search-result']",
                 timeout=25000,
             )
             page.wait_for_timeout(2000)
+            loaded = True
         except Exception:
-            blocked = ("captcha" in page.content().lower()
-                       or "robot" in page.inner_text("body")[:2000].lower())
+            blocked = _blocked(page)
             page.close()
-            print(f"[Amazon] {'captcha' if blocked else 'timeout'} "
-                  f"em '{keyword}'")
+            if blocked:
+                print(f"[Amazon] captcha em '{keyword}'")
+                return []
+            if attempt == 0:
+                print(f"[Amazon] timeout em '{keyword}', tentando de novo")
+                time.sleep(3)
+                continue
+            print(f"[Amazon] timeout em '{keyword}'")
             return []
+        break
+    if not loaded:
+        return []
 
+    try:
         cards = page.query_selector_all(
             "div[data-asin][data-component-type='s-search-result']"
         )
@@ -58,12 +111,13 @@ def search_amazon(keyword: str, min_discount: int):
                 round((1 - price / original) * 100)
                 if original and original > price else 0
             )
-            if discount < min_discount:
-                continue
+            card_text = card.inner_text().lower()
+            international = any(term in card_text for term in ("internacional", "import fees", "taxas de importação"))
             seen.add(asin)
             deals.append({
                 "id": f"amz-{asin}",
                 "store": "Amazon",
+                "origin": "international" if international else "unknown",
                 "title": title_el.inner_text().strip(),
                 "price": price,
                 "original_price": original or price,
@@ -72,7 +126,8 @@ def search_amazon(keyword: str, min_discount: int):
                 "image": (img_el.get_attribute("src") or "")
                          if img_el else "",
             })
-        page.close()
     except Exception as e:
         print(f"[Amazon] erro '{keyword}': {e}")
+    finally:
+        page.close()
     return deals
