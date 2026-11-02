@@ -159,6 +159,26 @@ PANEL_PASSWORD=sua_senha_segura
 
 ### Executar
 
+No criador manual, links do Mercado Livre com catálogo (`/p/MLB...`) e anúncio
+selecionado (`pdp_filters=item_id:MLB...`) tentam primeiro a API com o OAuth já
+configurado no banco. O preço vem somente do anúncio selecionado; título e foto
+vêm do catálogo. Sem preço anterior, nenhum desconto é inferido. Links `meli.la`
+são resolvidos por HTTP, usando apenas o botão explícito “Ir para produto” de
+páginas sociais, e o link monetizado original é preservado para publicação.
+
+Sem OAuth, com erro da API, variação explícita ou anúncio ausente na primeira
+página de ofertas, a extração usa o navegador existente. Links comuns continuam
+precisando de monetização, que pode exigir navegador. A fila do bot continua
+compartilhada com o monitoramento nesta etapa.
+
+O resultado do job de extração inclui `extraction_method`, `extraction_seconds`,
+`monetization_seconds` e `formatting_seconds`. Esses tempos não incluem a espera
+na fila nem a preparação da imagem no cliente. Para validar sem rede ou Telegram:
+
+```bash
+python -m unittest -v test_manual_extraction test_price_engine
+```
+
 ```bash
 # Bot (loop contínuo)
 python main.py

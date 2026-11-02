@@ -1,12 +1,16 @@
 import hashlib
 import json
 import re
+import logging
+import math
+import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
 import requests as http_requests
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from bs4 import BeautifulSoup
 
 from core import db, filters
 from core.affiliate import is_monetized, to_affiliate_url
@@ -378,8 +382,112 @@ def _social_product_url(page):
     return candidates.pop()
 
 
+def _ml_product_url(url):
+    """Resolve only the shared product, never profile recommendations."""
+    for _ in range(5):
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if (parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.port not in (None, 443)
+                or not (host == "meli.la" or host == "mercadolivre.com.br"
+                        or host.endswith(".mercadolivre.com.br"))):
+            return None
+        if re.search(r'/p/MLB\d+', parsed.path):
+            return _clean_url(url)
+        if host != "meli.la" and not parsed.path.startswith("/social/"):
+            return None
+        response = http_requests.get(url, timeout=5, allow_redirects=False)
+        if response.is_redirect:
+            url = urljoin(url, response.headers.get("Location", ""))
+            continue
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        targets = {urljoin(url, a["href"]) for a in soup.select("a[href]")
+                   if " ".join(a.stripped_strings).casefold() == "ir para produto"}
+        if len(targets) != 1:
+            return None
+        url = targets.pop()
+    return None
+
+
+def _extract_ml_api(url):
+    from scrapers.mercadolivre import _api, ml_api_ready
+
+    if not ml_api_ready():
+        return None
+    product_url = _ml_product_url(url)
+    if not product_url:
+        return None
+    parsed = urlparse(product_url)
+    catalog_id = re.search(r'/p/(MLB\d+)', parsed.path).group(1)
+    # A catalog can contain hundreds of sellers. Never substitute the cheapest.
+    selected = re.search(r'(?:^|;)item_id:(MLB\d+)(?:;|$)',
+                         parse_qs(parsed.query).get("pdp_filters", [""])[0])
+    if not selected:
+        return None
+    # Variation-specific links need the browser until variant matching is supported.
+    if any(key in parse_qs(parsed.query) for key in ("variation_id", "searchVariation")):
+        return None
+    product = _api(f"/products/{catalog_id}")
+    if not product:
+        return None
+    offers = _api(f"/products/{catalog_id}/items")
+    if not offers:
+        return None
+    offer = next((item for item in offers.get("results", [])
+                  if str(item.get("item_id", "")).replace("-", "") == selected.group(1)), None)
+    if not offer or offer.get("currency_id") != "BRL":
+        return None
+    price = float(offer.get("price") or 0)
+    pictures = product.get("pictures") or []
+    image = pictures[0].get("url", "") if pictures else ""
+    if not math.isfinite(price) or price <= 0 or not product.get("name") or not image:
+        return None
+    original = float(offer.get("original_price") or price)
+    if not math.isfinite(original) or original < price:
+        original = price
+    return {
+        "id": "manual-" + hashlib.sha1(product_url.encode()).hexdigest()[:16],
+        "store": "Mercado Livre", "title": product["name"],
+        "url": product_url, "price": price, "original_price": original,
+        "discount": round((1 - price / original) * 100) if original > price else 0,
+        "image": image, "international": False, "origin": "unknown",
+        "_error": None,
+    }
+
+
 def extract_link(url):
+    start = time.monotonic()
+    source = url
     url = _clean_url(_resolve_promotion_product(url))
+    deal = None
+    method = "browser"
+    if _store(url) == "Mercado Livre":
+        try:
+            deal = _extract_ml_api(url)
+        except (http_requests.RequestException, ValueError, TypeError, KeyError):
+            # API denial, missing data or timeout must keep the existing fallback.
+            logging.getLogger(__name__).info("ML manual API unavailable; using browser")
+        if deal:
+            method = "ml_catalog_api"
+    if deal is None:
+        deal = _extract_link_browser(url)
+        if deal["store"] == "Amazon":
+            method = "amazon_http"
+    # Keep the submitted affiliate link even when extraction used its destination.
+    if (deal["store"] == "Mercado Livre" and not deal.get("_error")
+            and (urlparse(source).hostname or "").lower() == "meli.la"
+            and is_monetized(source, "Mercado Livre")):
+        deal["affiliate_url"] = source
+    deal["extraction_method"] = method
+    deal["extraction_seconds"] = round(time.monotonic() - start, 3)
+    logging.getLogger(__name__).info("Manual extraction method=%s seconds=%.3f",
+                                   method, deal["extraction_seconds"])
+    return deal
+
+
+def _extract_link_browser(url):
+    url = _clean_url(url)
     store = _store(url)
     # Amazon: fast HTTP extraction (no Playwright needed)
     if store == "Amazon":
@@ -666,10 +774,14 @@ def process_jobs(urgent_only=False):
                 deal = extract_link(payload["url"])
                 if deal.get("_error"):
                     raise ValueError(deal["_error"])
-                link = to_affiliate_url(deal)
+                stage_start = time.monotonic()
+                link = deal.get("affiliate_url") or to_affiliate_url(deal)
+                deal["monetization_seconds"] = round(time.monotonic() - stage_start, 3)
                 deal["affiliate_url"] = link
                 deal["monetized"] = is_monetized(link, deal["store"])
+                stage_start = time.monotonic()
                 deal["whatsapp"] = format_whatsapp(deal, link)
+                deal["formatting_seconds"] = round(time.monotonic() - stage_start, 3)
                 db.finish_job(row["id"], deal)
             elif row["action"] == "scan_monitored":
                 item = db.get_monitored_item(payload["item_id"])
