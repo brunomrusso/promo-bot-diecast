@@ -208,12 +208,48 @@ def collect_ml_coupons():
 _link_cache = {}
 
 
-def ml_affiliate_link(product_url: str) -> str:
-    """Gera link de afiliado meli.la via Gerador de Links do hub (sessão logada)."""
-    if product_url in _link_cache:
-        return _link_cache[product_url]
+def _ml_link_api(product_url: str, tag: str) -> str:
+    """meli.la com uma etiqueta específica (mesma API do Gerador de Links). '' se falhar."""
+    page = _get_context().new_page()
+    try:
+        page.goto(LINKBUILDER_URL, timeout=45000)
+        page.wait_for_timeout(2000)
+        if is_ml_verification(page) or "login" in page.url or "identification" in page.url:
+            mark_ml_verification(page.url)
+            return ""
+        res = page.evaluate("""async ([u, t]) => {
+            const r = await fetch('/affiliate-program/api/v2/stripe/user/links', {method: 'POST', credentials: 'include',
+                headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url: u, tag: t})});
+            return {s: r.status, j: r.ok ? await r.json() : null};
+        }""", [product_url, tag])
+        j = (res or {}).get("j") or {}
+        link = j.get("short_url") or ""
+        if j.get("tag") == tag and re.match(r"https://meli\.la/\w+$", link):
+            return link
+        print(f"[ML-link] etiqueta {tag}: resposta inesperada (HTTP {(res or {}).get('s')})")
+    except Exception as e:
+        print(f"[ML-link] etiqueta {tag}: erro {e}")
+    finally:
+        page.close()
+    return ""
+
+
+def ml_affiliate_link(product_url: str, tag: str = None, fallback: bool = True) -> str:
+    """Gera link de afiliado meli.la. Com tag: usa essa etiqueta (canal); sem tag: etiqueta em uso na conta."""
+    key = (product_url, tag)
+    if key in _link_cache:
+        return _link_cache[key]
     if not ml_available():
         return product_url
+    if tag:
+        link = _ml_link_api(product_url, tag)
+        if link:
+            _link_cache[key] = link
+            db.cache_affiliate_link(f"Mercado Livre#{tag}", product_url, link)
+            return link
+        if not fallback:
+            return product_url  # site: tenta de novo na próxima rodada em vez de usar outra etiqueta
+        # falhou com a etiqueta: segue pelo gerador normal (etiqueta padrão) para não perder a venda
     try:
         ctx = _get_context()
         page = ctx.new_page()
@@ -239,7 +275,7 @@ def ml_affiliate_link(product_url: str) -> str:
         page.close()
         if links:
             link = links[0]
-            _link_cache[product_url] = link
+            _link_cache[(product_url, None)] = link
             db.cache_affiliate_link("Mercado Livre", product_url, link)
             return link
         print(f"[ML-link] falha ao gerar link p/ {product_url[:60]}")

@@ -325,6 +325,10 @@ def assemble(current, achadinhos, ml, az, hoje, new_ml_link):
         rank = 0
         for x in ml.get(c, []):
             o = old_ml.get(x["id"])
+            if o and config.ML_TAG_SITE and o.get("etiqueta") != config.ML_TAG_SITE:
+                novo = new_ml_link(x["id"])  # link antigo com outra etiqueta: refaz com a do site
+                if (novo or "").startswith("https://meli.la/"):
+                    o = dict(o, link_afiliado=novo, etiqueta=config.ML_TAG_SITE)
             if o:
                 nome, link = o["nome"], o["link_afiliado"]
                 if o.get("preco") != x["preco"]:
@@ -336,19 +340,22 @@ def assemble(current, achadinhos, ml, az, hoje, new_ml_link):
                     continue
                 report["novos"].append(f"ML {c}: {nome[:50]}")
             rank += 1
+            etq = (o or {}).get("etiqueta") if o else (config.ML_TAG_SITE or None)
             p = {"id": f"{c}-{rank:02d}", "loja": "mercadolivre", "id_ml": x["id"], "nome": nome,
                  "imagem": f"https://http2.mlstatic.com/D_NQ_NP_2X_{x['k']}-F.webp", "preco": x["preco"],
                  "preco_consultado_em": hoje, "categoria": c, "posicao_ranking": rank, "link_afiliado": link}
+            if etq:
+                p["etiqueta"] = etq
             if c == "pixar-cars":
                 p["posicao_ml"] = x["pos"]
             produtos.append(p)
         for i, x in enumerate(az.get(c, []), 1):
             o = old_az.get(x["asin"])
+            link = f"{AZ}/dp/{x['asin']}?tag={config.AMAZON_TAG_SITE}"  # site sempre com o ID do site
             if o:
-                nome, link = o["nome"], o["link_afiliado"]
+                nome = o["nome"]
             else:
                 nome = az_name(x["t"])
-                link = ach_az.get(x["asin"]) or f"{AZ}/dp/{x['asin']}?tag={config.AMAZON_TAG}"
                 report["novos"].append(f"Amazon {c}: {nome[:50]}")
             produtos.append({"id": f"az-{c}-{i:02d}", "loja": "amazon", "asin": x["asin"], "nome": nome,
                              "categoria": c, "posicao_ranking": i, "posicao_amazon": x["rank"],
@@ -417,7 +424,7 @@ def check_safe(old, new):
     for p in new["produtos"]:
         link = p.get("link_afiliado", "")
         ok = link.startswith(("https://meli.la/", "https://link.amazon/")) or (
-            p.get("loja") == "amazon" and link.startswith(f"{AZ}/dp/") and f"tag={config.AMAZON_TAG}" in link)
+            p.get("loja") == "amazon" and link.startswith(f"{AZ}/dp/") and f"tag={config.AMAZON_TAG_SITE}" in link)
         if not ok:
             problems.append(f"link inválido: {p['id']}")
         if p.get("imagem") and not p["imagem"].startswith("https://http2.mlstatic.com/"):
@@ -428,15 +435,22 @@ def check_safe(old, new):
         raise Unsafe("; ".join(problems[:6]))
 
 
-def update_achadinhos(ach, prices, hoje):
+def update_achadinhos(ach, prices, hoje, relink=None):
     """Achadinhos MANUAIS do ML: preço, histórico (1 por dia, até 180) e ativo. prices[id_ml] = preço ou None."""
     itens, resumo = [], []
     for i in ach.get("itens", []):
+        if i.get("origem") != "app" and i.get("loja") == "amazon" and i.get("asin"):
+            itens.append(dict(i, link_afiliado=f"{AZ}/dp/{i['asin']}?tag={config.AMAZON_TAG_SITE}"))  # ID do site
+            continue
         if i.get("origem") == "app" or i.get("loja") != "mercadolivre" or i.get("id_ml") not in prices:
             itens.append(i)
             continue
         dia = hoje[:10]  # histórico: 1 registro por dia
         n = dict(i, historico=[h for h in i.get("historico", []) if h.get("data") != dia])
+        if relink and config.ML_TAG_SITE and n.get("etiqueta") != config.ML_TAG_SITE:
+            novo = relink(i["id_ml"])  # link com a etiqueta do site
+            if (novo or "").startswith("https://meli.la/"):
+                n["link_afiliado"], n["etiqueta"] = novo, config.ML_TAG_SITE
         preco = prices[i["id_ml"]]
         n["preco_consultado_em"] = hoje
         if preco is None:
@@ -628,8 +642,8 @@ def collect_az(cats=None):
 
 
 def _new_ml_link(id_ml):
-    from core.affiliate import to_affiliate_url
-    return to_affiliate_url({"id": f"ml-{id_ml}", "store": "Mercado Livre", "url": ml_url(id_ml)})
+    from core.affiliate import ml_site_link
+    return ml_site_link(ml_url(id_ml))  # etiqueta do site
 
 
 def _site_json(name):
@@ -708,7 +722,7 @@ def run(publish=False, origem="painel", escopo=None):
             _progress(f"Achadinhos: preço {k + 1} de {len(manual_ml)}", 86 + 8 * k / max(1, len(manual_ml)))
             prices[id_ml] = ml_price(id_ml)
             _pause()
-        ach_new, ach_resumo = update_achadinhos(ach, prices, hoje) if esc["achadinhos"] else (ach, [])
+        ach_new, ach_resumo = update_achadinhos(ach, prices, hoje, _new_ml_link) if esc["achadinhos"] else (ach, [])
         PREVIEW.parent.mkdir(parents=True, exist_ok=True)
         PREVIEW.write_text(json.dumps(produtos, ensure_ascii=False, indent=2), encoding="utf-8")
         PREVIEW_ACH.write_text(json.dumps(ach_new, ensure_ascii=False, indent=2), encoding="utf-8")

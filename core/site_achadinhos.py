@@ -57,9 +57,7 @@ def build_item(deal, link, preco_alvo, categoria, hoje):
         asin = _asin(deal.get("url"))
         if not asin:
             raise ValueError("Não reconheci o produto da Amazon nesse link.")
-        tag = getattr(config, "AMAZON_TAG", "")
-        if not (link.startswith("https://link.amazon/") or (f"/dp/{asin}" in link and f"tag={tag}" in link)):
-            link = f"https://www.amazon.com.br/dp/{asin}?tag={tag}"
+        link = f"https://www.amazon.com.br/dp/{asin}?tag={config.AMAZON_TAG_SITE}"  # ID de rastreamento do site
         # Amazon: sem preço/foto no arquivo (regra da Amazon); o site usa a API.
         return {"id": f"ach-az-{asin}", "loja": "amazon", "asin": asin, "nome": _nome(deal.get("title")),
                 "preco_alvo": preco_alvo, "categoria": categoria, "link_afiliado": link, "adicionado_em": hoje[:10]}
@@ -113,6 +111,7 @@ def parse_preco(v):
 
 
 def add(url, preco_alvo, categoria, extract=None):
+    import config
     from core.affiliate import to_affiliate_url
     from core.site_ranking import stamp
     if extract is None:
@@ -125,8 +124,16 @@ def add(url, preco_alvo, categoria, extract=None):
     deal = extract(url.strip())
     if deal.get("_error"):
         raise ValueError(deal["_error"])
-    link = deal.get("affiliate_url") or to_affiliate_url(deal)
+    link, etiqueta = deal.get("affiliate_url") or "", None
+    if deal.get("store") == "Mercado Livre" and config.ML_TAG_SITE:
+        from core.affiliate import ml_site_link
+        site_link = ml_site_link(deal.get("url", ""))  # etiqueta do site
+        if site_link.startswith("https://meli.la/"):
+            link, etiqueta = site_link, config.ML_TAG_SITE
+    link = link or to_affiliate_url(deal)
     item = build_item(deal, link, preco_alvo, categoria, stamp())
+    if etiqueta and item["loja"] == "mercadolivre":
+        item["etiqueta"] = etiqueta  # sem isso, o bot refaz o link com a etiqueta do site na próxima rodada
     final, acao = _publish(lambda d: upsert(d, item))
     if not any(x.get("id") == item["id"] for x in final.get("itens", [])):
         raise RuntimeError("Publiquei mas o item não apareceu no arquivo do site. Tente de novo.")

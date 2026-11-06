@@ -39,7 +39,10 @@ ML_CLIENT_SECRET = os.getenv("ML_CLIENT_SECRET", "")
 LOMADEE_APP_TOKEN = os.getenv("LOMADEE_APP_TOKEN", "")
 LOMADEE_SOURCE_ID = os.getenv("LOMADEE_SOURCE_ID", "")
 
-AMAZON_TAG = os.getenv("AMAZON_TAG", "")
+AMAZON_TAG = os.getenv("AMAZON_TAG", "")  # links enviados pelo bot (WhatsApp/Telegram)
+AMAZON_TAG_SITE = os.getenv("AMAZON_TAG_SITE", "") or AMAZON_TAG  # links do site (russodiecast.com.br)
+ML_TAG_BOT = os.getenv("ML_TAG_BOT", "")    # etiqueta do ML nos links do bot (WhatsApp/Telegram); vazio = etiqueta em uso
+ML_TAG_SITE = os.getenv("ML_TAG_SITE", "")  # etiqueta do ML nos links do site
 DASHBOARD_URL = os.getenv("DASHBOARD_URL", "")  # e.g. https://meubot.example.com
 SHOPEE_AFFILIATE_ID = os.getenv("SHOPEE_AFFILIATE_ID", "")
 ML_AFFILIATE_PREFIX = os.getenv("ML_AFFILIATE_PREFIX", "")

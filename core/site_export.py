@@ -55,7 +55,11 @@ def build_app_items(generate_links=True):
             continue
         deal = {"id": offer["product_id"], "store": offer["store"], "url": offer["url"] or "",
                 "title": offer["title"], "price": offer["price"], "image": offer.get("image") or ""}
-        link = to_affiliate_url(deal) if generate_links else cached_affiliate_url(deal)
+        if deal["store"] == "Mercado Livre" and config.ML_TAG_SITE:
+            from core.affiliate import ml_site_link
+            link = ml_site_link(deal["url"], generate=generate_links)  # etiqueta do site
+        else:
+            link = to_affiliate_url(deal) if generate_links else cached_affiliate_url(deal)
         if not is_monetized(link, deal["store"]):
             skipped.append((item["name"], "link de afiliado ainda não gerado (o bot gera no próximo ciclo)"
                             if not generate_links else "link de afiliado não gerado"))
@@ -75,7 +79,9 @@ def build_app_items(generate_links=True):
             if any(o["id"] == f"ach-az-{m.group(1)}" for o in out):
                 skipped.append((item["name"], "mesmo anúncio de outra mini já está no site"))
                 continue
-            out.append({"id": f"ach-az-{m.group(1)}", "loja": "amazon", "asin": m.group(1), **base})
+            from core.affiliate import amazon_site_link
+            out.append({"id": f"ach-az-{m.group(1)}", "loja": "amazon", "asin": m.group(1),
+                        **dict(base, link_afiliado=amazon_site_link(m.group(1)))})  # ID de rastreamento do site
             continue
         id_ml = deal["id"].removeprefix("ml-")
         if any(o["id"] == f"ach-ml-{id_ml}" for o in out):

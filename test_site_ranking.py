@@ -86,7 +86,7 @@ class SiteRankingTests(unittest.TestCase):
               "pixar-cars": [{"id": "MLB4", "t": "Carros McQueen", "preco": 30.0, "k": "1-MLB4_1", "pos": 7}]}
         az = {"hot-wheels": [{"asin": "B000000001", "rank": 3, "t": "x"}, {"asin": "B000000002", "rank": 9, "t": "Hot Wheels Novo | Mattel"}]}
         links = {"MLB2": "https://meli.la/new", "MLB4": "https://meli.la/px", "MLB3": "https://www.mercadolivre.com.br/p/MLB3"}
-        with patch("config.AMAZON_TAG", "promocoesdiec-20"):
+        with patch("config.AMAZON_TAG", "russowhats-20"), patch("config.AMAZON_TAG_SITE", "russosite-20"):
             out, rep = sr.assemble(current, {"itens": []}, ml, az, "2026-11-06", lambda i: links[i])
             sr.check_safe(current, out)
         p = {x["id"]: x for x in out["produtos"]}
@@ -96,8 +96,8 @@ class SiteRankingTests(unittest.TestCase):
         self.assertNotIn("hot-wheels-03", p)  # sem meli.la não entra
         self.assertEqual(rep["sem_link"], ["hot-wheels: Sem link"])
         self.assertEqual(p["pixar-cars-01"]["posicao_ml"], 7)
-        self.assertEqual(p["az-hot-wheels-01"]["link_afiliado"], "https://link.amazon/abc")
-        self.assertEqual(p["az-hot-wheels-02"]["link_afiliado"], "https://www.amazon.com.br/dp/B000000002?tag=promocoesdiec-20")
+        self.assertEqual(p["az-hot-wheels-01"]["link_afiliado"], "https://www.amazon.com.br/dp/B000000001?tag=russosite-20")
+        self.assertEqual(p["az-hot-wheels-02"]["link_afiliado"], "https://www.amazon.com.br/dp/B000000002?tag=russosite-20")
         self.assertEqual(p["az-hot-wheels-02"]["nome"], "Hot Wheels Novo")
         self.assertNotIn("preco", p["az-hot-wheels-02"])
         self.assertTrue(any("Saiu" in r for r in rep["removidos"]))
@@ -176,6 +176,42 @@ class SiteRankingTests(unittest.TestCase):
         old = {"produtos": [{"id": f"lego-{i}", "loja": "mercadolivre", "categoria": "lego", "link_afiliado": "https://meli.la/a"} for i in range(5)]}
         with self.assertRaises(sr.Unsafe):
             sr.check_safe(old, {"produtos": []})
+
+    def test_etiqueta_do_site_no_ml(self):
+        current = {"categorias": [{"id": "lego"}], "produtos": [
+            {"id": "lego-01", "loja": "mercadolivre", "id_ml": "MLB1", "nome": "Velho", "preco": 10, "categoria": "lego",
+             "link_afiliado": "https://meli.la/velho"},
+            {"id": "lego-02", "loja": "mercadolivre", "id_ml": "MLB2", "nome": "Ja certo", "preco": 10, "categoria": "lego",
+             "link_afiliado": "https://meli.la/certo", "etiqueta": "russosite"},
+            {"id": "lego-03", "loja": "mercadolivre", "id_ml": "MLB3", "nome": "Falha", "preco": 10, "categoria": "lego",
+             "link_afiliado": "https://meli.la/mantem"}]}
+        ml = {"lego": [{"id": f"MLB{n}", "t": "LEGO x", "preco": 10.0, "k": f"1-MLB{n}_1", "pos": n} for n in (1, 2, 3, 4)]}
+        links = {"MLB1": "https://meli.la/novo1", "MLB3": "", "MLB4": "https://meli.la/novo4"}
+        pedidos = []
+        def gen(i):
+            pedidos.append(i); return links[i]
+        with patch("config.ML_TAG_SITE", "russosite"):
+            out, rep = sr.assemble(current, {"itens": []}, ml, {}, "2026-11-06T10:00", gen)
+        p = {x["id_ml"]: x for x in out["produtos"]}
+        self.assertEqual(sorted(pedidos), ["MLB1", "MLB3", "MLB4"])  # MLB2 já estava com a etiqueta do site
+        self.assertEqual((p["MLB1"]["link_afiliado"], p["MLB1"]["etiqueta"]), ("https://meli.la/novo1", "russosite"))
+        self.assertEqual(p["MLB2"]["link_afiliado"], "https://meli.la/certo")
+        self.assertEqual(p["MLB3"]["link_afiliado"], "https://meli.la/mantem")  # falhou: mantém o antigo
+        self.assertNotIn("etiqueta", p["MLB3"])  # e tenta de novo na próxima
+        self.assertEqual(p["MLB4"]["etiqueta"], "russosite")
+        ach = {"itens": [{"id": "ach-ml-MLB7", "loja": "mercadolivre", "id_ml": "MLB7", "nome": "A", "preco_alvo": 50,
+                          "link_afiliado": "https://meli.la/old", "historico": []}]}
+        with patch("config.ML_TAG_SITE", "russosite"):
+            new, _ = sr.update_achadinhos(ach, {"MLB7": 40.0}, "2026-11-06T10:00", lambda i: "https://meli.la/a7")
+        self.assertEqual((new["itens"][0]["link_afiliado"], new["itens"][0]["etiqueta"]), ("https://meli.la/a7", "russosite"))
+
+    def test_achadinho_amazon_ganha_id_do_site(self):
+        ach = {"itens": [{"id": "ach-az-B0X", "loja": "amazon", "asin": "B0XXXXXXXX", "link_afiliado": "https://link.amazon/old"},
+                         {"id": "ach-az-B0Y", "loja": "amazon", "asin": "B0YYYYYYYY", "origem": "app", "link_afiliado": "x"}]}
+        with patch("config.AMAZON_TAG_SITE", "russosite-20"):
+            new, _ = sr.update_achadinhos(ach, {}, "2026-11-06T10:00")
+        self.assertEqual(new["itens"][0]["link_afiliado"], "https://www.amazon.com.br/dp/B0XXXXXXXX?tag=russosite-20")
+        self.assertEqual(new["itens"][1]["link_afiliado"], "x")  # item do app: o site_export cuida
 
     def test_achadinhos(self):
         ach = {"itens": [
@@ -295,9 +331,9 @@ class SiteAchadinhosTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sa.build_item(ml, "https://www.mercadolivre.com.br/x", 95.0, None, "2026-11-06T10:00")  # sem meli.la
         az = {"store": "Amazon", "title": "LEGO 31134 | Ônibus", "price": 63.99, "url": "https://www.amazon.com.br/dp/B0AAAAAAAA"}
-        with patch("config.AMAZON_TAG", "promocoesdiec-20"):
+        with patch("config.AMAZON_TAG_SITE", "russosite-20"):
             a = sa.build_item(az, "", 60.0, "lego", "2026-11-06T10:00")
-        self.assertEqual(a["link_afiliado"], "https://www.amazon.com.br/dp/B0AAAAAAAA?tag=promocoesdiec-20")
+        self.assertEqual(a["link_afiliado"], "https://www.amazon.com.br/dp/B0AAAAAAAA?tag=russosite-20")
         self.assertNotIn("preco", a)
         self.assertNotIn("imagem", a)
 

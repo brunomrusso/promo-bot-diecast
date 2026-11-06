@@ -30,11 +30,37 @@ def _clean_amazon_url(url: str) -> str:
     return url
 
 
+def amazon_site_link(asin: str) -> str:
+    """Link da Amazon usado no SITE: ID de rastreamento próprio do site (relatório separado do WhatsApp)."""
+    return f"https://www.amazon.com.br/dp/{asin}?tag={config.AMAZON_TAG_SITE}"
+
+
+def _cache_store(store: str) -> str:
+    """O cache de links do ML é separado por etiqueta (link de um canal não vai para outro)."""
+    return f"{store}#{config.ML_TAG_BOT}" if store == "Mercado Livre" and config.ML_TAG_BOT else store
+
+
+def ml_site_link(product_url: str, generate: bool = True) -> str:
+    """meli.la do SITE (etiqueta do site). Sem etiqueta configurada, usa o link normal do bot."""
+    from core import db
+    tag = config.ML_TAG_SITE
+    if not tag:
+        return to_affiliate_url({"store": "Mercado Livre", "url": product_url}) if generate else \
+            cached_affiliate_url({"store": "Mercado Livre", "url": product_url})
+    cached = db.cached_affiliate_link(f"Mercado Livre#{tag}", product_url)
+    if cached:
+        return cached
+    if not generate:
+        return ""
+    from scrapers.ml_coupons import ml_affiliate_link
+    return ml_affiliate_link(product_url, tag, fallback=False)
+
+
 def cached_affiliate_url(deal: dict) -> str:
     from core import db
 
     store, url = deal["store"], deal["url"]
-    link = db.cached_affiliate_link(store, url)
+    link = db.cached_affiliate_link(_cache_store(store), url)
     if link and is_monetized(link, store):
         return link
     if is_monetized(url, store):
@@ -55,7 +81,7 @@ def to_affiliate_url(deal: dict) -> str:
         return cached
     link = _generate_affiliate_url(deal)
     if is_monetized(link, deal["store"]):
-        db.cache_affiliate_link(deal["store"], deal["url"], link)
+        db.cache_affiliate_link(_cache_store(deal["store"]), deal["url"], link)
     return link
 
 
@@ -92,7 +118,7 @@ def _generate_affiliate_url(deal: dict) -> str:
         # gera meli.la de afiliado via Gerador de Links (sessão logada)
         try:
             from scrapers.ml_coupons import ml_affiliate_link
-            return ml_affiliate_link(url)
+            return ml_affiliate_link(url, config.ML_TAG_BOT or None)
         except Exception:
             return url
 

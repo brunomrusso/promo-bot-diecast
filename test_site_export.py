@@ -36,7 +36,7 @@ class SiteExportTests(unittest.TestCase):
     @patch("core.site_export.to_affiliate_url")
     def test_build_ml_and_amazon(self, aff):
         aff.side_effect = lambda d: "https://meli.la/abc" if d["store"] == "Mercado Livre" else "https://www.amazon.com.br/dp/B0FK1F7PTQ?tag=promocoesdiec-20"
-        with patch("config.AMAZON_TAG", "promocoesdiec-20"):
+        with patch("config.AMAZON_TAG", "promocoesdiec-20"), patch("config.AMAZON_TAG_SITE", "russosite-20"):
             ml = self.mini("Hot Wheels Skyline", 45)
             self.obs(ml, "ml-MLB123", "Mercado Livre", 50, "https://www.mercadolivre.com.br/p/MLB123", "https://http2.mlstatic.com/D_Q_NP_2X_756084-MLB118718314622_102026-AB.webp")
             self.obs(ml, "ml-MLB999", "Mercado Livre", 39.9, "https://www.mercadolivre.com.br/p/MLB999", "https://http2.mlstatic.com/D_NQ_NP_640-MLA1_012026-O.webp")
@@ -55,6 +55,7 @@ class SiteExportTests(unittest.TestCase):
         self.assertEqual(len(m["historico"]), 1)
         a = by["amazon"]
         self.assertEqual(a["asin"], "B0FK1F7PTQ")
+        self.assertEqual(a["link_afiliado"], "https://www.amazon.com.br/dp/B0FK1F7PTQ?tag=russosite-20")  # site usa o ID do site
         self.assertNotIn("preco", a)
         self.assertNotIn("imagem", a)
         self.assertEqual(skipped, [("Hot Wheels Sem Oferta", "sem oferta recente no ML/Amazon")])
