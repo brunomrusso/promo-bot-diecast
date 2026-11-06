@@ -126,6 +126,21 @@ class SiteRankingTests(unittest.TestCase):
         self.assertEqual(len(sr.ml_items_any(ML_PAGE)), 2)  # HTML normal: não usa o plano B... (só 2 itens válidos, JSON vazio)
         self.assertEqual(sr._avisos, [])
 
+    def test_marca_que_sumiu_nao_pausa_o_ml(self):
+        pages = {sr.ML + "/mais-vendidos/MLB2097": ML_PAGE.replace(">Mini GT<", ">Outra marca<")}
+        def page(u):
+            if "attribute_value_id=999" in u:
+                raise sr.PaginaIndisponivel("ML respondeu HTTP 400")
+            return pages.get(u, ML_PAGE)
+        db.set_setting(sr.ML_LINKS_KEY, {"mini-gt|mini gt": sr.ML + "/mais-vendidos/MLB2097?attribute_id=BRAND&attribute_value_id=999"})
+        with patch.object(sr, "_ml_page_html", page), patch.object(sr, "_pause", lambda: None):
+            sr._avisos.clear(); sr._pulados.clear()
+            out = sr.collect_ml(["mini-gt", "hot-wheels"])
+        self.assertEqual(sr._pulados, {"mini-gt"})
+        self.assertNotIn("mini-gt", out)
+        self.assertIn("hot-wheels", out)  # as outras categorias seguem
+        self.assertTrue(any("mantive os produtos anteriores" in a for a in sr._avisos))
+
     def test_ml_filter_link_cache(self):
         pages = {sr.ML + "/mais-vendidos/MLB2097": ML_PAGE}
         with patch.object(sr, "_ml_page_html", lambda u: pages.get(u, ML_PAGE)), patch.object(sr, "_pause", lambda: None):
@@ -136,8 +151,9 @@ class SiteRankingTests(unittest.TestCase):
             sr.collect_ml(["mini-gt"])  # link sumiu: usa o último que funcionou, não para
             self.assertTrue(any("último link" in a for a in sr._avisos))
             db.set_setting(sr.ML_LINKS_KEY, {})
-            with self.assertRaises(sr.Unsafe):
-                sr.collect_ml(["mini-gt"])
+            sr._pulados.clear()
+            self.assertEqual(sr.collect_ml(["mini-gt"]), {})  # sem filtro e sem link guardado: pula a categoria
+            self.assertEqual(sr._pulados, {"mini-gt"})
 
     def test_failure_alerts_once_then_on_third(self):
         site = {"categorias": [{"id": "lego"}], "produtos": []}

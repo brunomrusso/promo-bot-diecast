@@ -58,6 +58,10 @@ class Blocked(Exception):
     """Captcha, login ou bloqueio: nada é publicado."""
 
 
+class PaginaIndisponivel(Exception):
+    """Página do ML respondeu erro (400/404 "Ops! Ocorreu um erro"): não é bloqueio, não pausa o ML."""
+
+
 class Unsafe(Exception):
     """O resultado não parece confiável (categoria sumiu, poucos itens...): nada é publicado."""
 
@@ -541,7 +545,10 @@ def _ml_page_html(url):
     try:
         resp = page.goto(url, wait_until="domcontentloaded", timeout=45000)
         page.wait_for_timeout(2500)
-        if (resp is not None and resp.status >= 400) or is_ml_verification(page):
+        status = resp.status if resp is not None else 0
+        if status in (400, 404, 410):  # link de filtro que não existe mais: erro da página, não anti-bot
+            raise PaginaIndisponivel(f"ML respondeu HTTP {status} em {url[:90]}")
+        if status >= 400 or is_ml_verification(page):
             mark_ml_verification(page.url)
             try:
                 titulo = page.title()[:60]
@@ -558,6 +565,9 @@ NOMES = {"mini-gt": "Mini GT", "hot-wheels": "Hot Wheels", "pixar-cars": "Pixar 
 LOJAS = {"mercadolivre": "Mercado Livre", "amazon": "Amazon"}
 
 
+_pulados = set()  # categorias do ML que não deu para ler nesta execução (o site mantém as anteriores)
+
+
 def collect_ml(cats=None):
     raw = {}
     fontes = [(c, v) for c, v in ML_SOURCES.items() if not cats or c in cats]
@@ -565,19 +575,27 @@ def collect_ml(cats=None):
         _progress(f"Mercado Livre: {NOMES[c]} ({n + 1} de {len(fontes)})", 2 + 42 * n / len(fontes))
         html = _ml_page_html(ML + start)
         cache = db.get_setting(ML_LINKS_KEY, {}) or {}
-        for name in path:
-            links = ml_links(html)
-            url = links.get(norm(name)) or next((u for t, u in links.items() if t.startswith(norm(name))), None)
-            ck = f"{c}|{norm(name)}"
-            if url:
-                cache[ck] = url
-            elif cache.get(ck):  # plano B: o link do filtro sumiu da página, usa o último que funcionou
-                url = cache[ck]
-                _avisos.append(f"ML {NOMES[c]}: filtro '{name}' não apareceu na página; usei o último link conhecido")
-            else:
-                raise Unsafe(f"ML: não achei o filtro '{name}' em {c}")
+        try:
+            for name in path:
+                links = ml_links(html)
+                url = links.get(norm(name)) or next((u for t, u in links.items() if t.startswith(norm(name))), None)
+                ck = f"{c}|{norm(name)}"
+                if url:
+                    cache[ck] = url
+                elif cache.get(ck):  # plano B: o link do filtro sumiu da página, tenta o último que funcionou
+                    url = cache[ck]
+                    _avisos.append(f"ML {NOMES[c]}: filtro '{name}' não apareceu na página; tentei o último link conhecido")
+                else:
+                    raise PaginaIndisponivel(f"filtro '{name}' não aparece hoje na página do ML")
+                _pause()
+                html = _ml_page_html(url)
+        except PaginaIndisponivel as exc:
+            # O ML só mostra as marcas mais vendidas do momento; quando uma some (ex.: Mini GT em 06/11),
+            # o site mantém os produtos anteriores dessa categoria e as outras seguem normalmente.
+            _pulados.add(c)
+            _avisos.append(f"ML {NOMES[c]}: não deu para ler ({exc}); mantive os produtos anteriores")
             _pause()
-            html = _ml_page_html(url)
+            continue
         db.set_setting(ML_LINKS_KEY, cache)
         raw[c] = ml_items_any(html, NOMES[c])
         _pause()
@@ -698,6 +716,7 @@ def run(publish=False, origem="painel", escopo=None):
     _cur.clear()
     _cur.update(state)
     _avisos.clear()
+    _pulados.clear()
     db.set_setting(CANCEL_KEY, None)
     db.set_system_state(STATE_KEY, state)
     try:
@@ -708,6 +727,7 @@ def run(publish=False, origem="painel", escopo=None):
         if groups:
             ml = collect_ml(esc["cats"]) if "mercadolivre" in esc["lojas"] else {}
             az = collect_az(esc["cats"]) if "amazon" in esc["lojas"] else {}
+            groups -= {("mercadolivre", c) for c in _pulados}  # categorias puladas ficam como estavam
             n_links = [0]
 
             def link_com_progresso(id_ml):  # links novos do ML demoram ~10 s cada: mostra no painel
@@ -739,7 +759,7 @@ def run(publish=False, origem="painel", escopo=None):
                      novos=report["novos"][:40], removidos=report["removidos"][:40],
                      precos=report["precos"][:40], n_precos=len(report["precos"]), sem_link=report["sem_link"][:20],
                      itens_app=sum(1 for i in ach.get("itens", []) if i.get("origem") == "app"),
-                     plano_b=list(_avisos),
+                     plano_b=list(_avisos), pulados=sorted(_pulados),
                      fim=datetime.now(ZONE).isoformat(timespec="seconds"))
     except Cancelled:
         state.update(status="cancelado", publicado=False, erro="Cancelado pelo painel. Nada foi publicado.",
@@ -879,7 +899,7 @@ def publish_preview():
     ach_new = json.loads(PREVIEW_ACH.read_text(encoding="utf-8"))
     current = ensure_cats(_site_json("products.json"))
     esc = st.get("escopo") or {"cats": CATS, "lojas": list(LOJAS), "achadinhos": True}
-    groups = {(l, c) for l in esc["lojas"] for c in esc["cats"]}
+    groups = {(l, c) for l in esc["lojas"] for c in esc["cats"]} - {("mercadolivre", c) for c in st.get("pulados") or []}
     if groups:
         # o site pode ter mudado depois da prévia: reaplica só os grupos da prévia sobre o site atual
         produtos = merge_partial(current, produtos, groups)
