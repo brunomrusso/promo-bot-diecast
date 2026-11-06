@@ -543,7 +543,12 @@ def _ml_page_html(url):
         page.wait_for_timeout(2500)
         if (resp is not None and resp.status >= 400) or is_ml_verification(page):
             mark_ml_verification(page.url)
-            raise Blocked(f"Mercado Livre bloqueou {url[:80]}")
+            try:
+                titulo = page.title()[:60]
+            except Exception:
+                titulo = "?"
+            raise Blocked(f"Mercado Livre bloqueou (HTTP {resp.status if resp else '?'}, foi para "
+                          f"{page.url.split('?')[0][-60:]}, título '{titulo}') ao abrir {url[:70]}")
         return page.content()
     finally:
         page.close()
