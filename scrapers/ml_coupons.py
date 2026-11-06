@@ -67,11 +67,23 @@ def is_ml_verification(page):
         url = page.url.lower()
         title = page.title().lower()
         body = page.inner_text("body")[:4000].lower()
+        if is_ml_error(page):
+            return False  # página de erro ("Ops! Ocorreu um erro") não é anti-bot: não pausa o ML
         return ("captcha" in url or "wall/logged" in url
                 or "account-verification" in url or "segurança" in title
                 or "verificação" in body or "captcha" in body
-                or "hubo un error" in body or "error accediendo" in body
-                or "houve um erro" in body)
+                or "error accediendo" in body)
+    except Exception:
+        return False
+
+
+def is_ml_error(page):
+    """Página de erro do ML (anúncio/filtro que não existe mais, erro temporário). Não é bloqueio."""
+    try:
+        title = page.title().lower()
+        body = page.inner_text("body")[:2000].lower()
+        return ("ocorreu um erro" in title or "ocurrió un error" in title
+                or "houve um erro" in body or "hubo un error" in body or "ocorreu um erro" in body)
     except Exception:
         return False
 
@@ -136,7 +148,8 @@ def _get_context():
 
 
 def close_context():
-    global _ctx, _pw
+    global _ctx, _pw, _api_page
+    _api_page = None
     if _ctx:
         try:
             _ctx.close()
@@ -225,14 +238,28 @@ def collect_ml_coupons():
 _link_cache = {}
 
 
+_api_page = None  # uma página do Gerador de Links fica aberta e é reaproveitada (economiza proxy)
+
+
+def _link_page():
+    global _api_page
+    if _api_page is not None and not _api_page.is_closed() and "mercadolivre.com.br" in _api_page.url:
+        return _api_page
+    _api_page = _get_context().new_page()
+    _api_page.goto(LINKBUILDER_URL, timeout=45000)
+    _api_page.wait_for_timeout(2000)
+    return _api_page
+
+
 def _ml_link_api(product_url: str, tag: str) -> str:
     """meli.la com uma etiqueta específica (mesma API do Gerador de Links). '' se falhar."""
-    page = _get_context().new_page()
+    global _api_page
     try:
-        page.goto(LINKBUILDER_URL, timeout=45000)
-        page.wait_for_timeout(2000)
+        page = _link_page()
         if is_ml_verification(page) or "login" in page.url or "identification" in page.url:
             mark_ml_verification(page.url)
+            page.close()
+            _api_page = None
             return ""
         res = page.evaluate("""async ([u, t]) => {
             const r = await fetch('/affiliate-program/api/v2/stripe/user/links', {method: 'POST', credentials: 'include',
@@ -246,8 +273,12 @@ def _ml_link_api(product_url: str, tag: str) -> str:
         print(f"[ML-link] etiqueta {tag}: resposta inesperada (HTTP {(res or {}).get('s')})")
     except Exception as e:
         print(f"[ML-link] etiqueta {tag}: erro {e}")
-    finally:
-        page.close()
+        try:
+            if _api_page is not None:
+                _api_page.close()
+        except Exception:
+            pass
+        _api_page = None
     return ""
 
 

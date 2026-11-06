@@ -538,7 +538,7 @@ def _pause():
 
 
 def _ml_page_html(url):
-    from scrapers.ml_coupons import _get_context, is_ml_verification, mark_ml_verification, ml_available
+    from scrapers.ml_coupons import _get_context, is_ml_error, is_ml_verification, mark_ml_verification, ml_available
     if not ml_available():
         raise Blocked("Mercado Livre pede verificação manual (sessão do bot)")
     page = _get_context().new_page()
@@ -546,7 +546,7 @@ def _ml_page_html(url):
         resp = page.goto(url, wait_until="domcontentloaded", timeout=45000)
         page.wait_for_timeout(2500)
         status = resp.status if resp is not None else 0
-        if status in (400, 404, 410):  # link de filtro que não existe mais: erro da página, não anti-bot
+        if status in (400, 404, 410) or is_ml_error(page):  # filtro/página que não existe mais: não é anti-bot
             raise PaginaIndisponivel(f"ML respondeu HTTP {status} em {url[:90]}")
         if status >= 400 or is_ml_verification(page):
             mark_ml_verification(page.url)
@@ -604,11 +604,13 @@ def collect_ml(cats=None):
 
 def ml_price(id_ml):
     """Preço atual do anúncio (meta itemprop=price); None se sumiu ou está sem estoque."""
-    from scrapers.ml_coupons import _get_context, is_ml_verification, mark_ml_verification
+    from scrapers.ml_coupons import _get_context, is_ml_error, is_ml_verification, mark_ml_verification
     page = _get_context().new_page()
     try:
-        page.goto(ml_url(id_ml), wait_until="domcontentloaded", timeout=45000)
+        resp = page.goto(ml_url(id_ml), wait_until="domcontentloaded", timeout=45000)
         page.wait_for_timeout(3000)
+        if (resp is not None and resp.status in (400, 404, 410)) or is_ml_error(page):
+            return None  # anúncio que não existe mais: achadinho sai do ar, não é bloqueio
         if is_ml_verification(page):
             mark_ml_verification(page.url)
             raise Blocked("Mercado Livre bloqueou a página de um achadinho")
@@ -745,7 +747,15 @@ def run(publish=False, origem="painel", escopo=None):
         prices = {}
         for k, id_ml in enumerate(manual_ml):
             _progress(f"Achadinhos: preço {k + 1} de {len(manual_ml)}", 86 + 8 * k / max(1, len(manual_ml)))
-            prices[id_ml] = ml_price(id_ml)
+            try:
+                prices[id_ml] = ml_price(id_ml)
+            except Blocked as exc:
+                # O ranking já foi lido: publica o ranking e deixa os achadinhos como estavam.
+                _avisos.append(f"Achadinhos do ML não atualizados nesta rodada ({exc}); ranking publicado normalmente")
+                prices = {}
+                break
+            except Exception as exc:
+                _avisos.append(f"Achadinho {id_ml}: não deu para ler o preço ({type(exc).__name__}); ficou como estava")
             _pause()
         ach_new, ach_resumo = update_achadinhos(ach, prices, hoje, _new_ml_link) if esc["achadinhos"] else (ach, [])
         PREVIEW.parent.mkdir(parents=True, exist_ok=True)

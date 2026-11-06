@@ -126,6 +126,21 @@ class SiteRankingTests(unittest.TestCase):
         self.assertEqual(len(sr.ml_items_any(ML_PAGE)), 2)  # HTML normal: não usa o plano B... (só 2 itens válidos, JSON vazio)
         self.assertEqual(sr._avisos, [])
 
+    def test_bloqueio_no_achadinho_nao_perde_o_ranking(self):
+        site = {"categorias": [{"id": "lego"}], "produtos": []}
+        ach = {"atualizado_em": "x", "itens": [{"id": "ach-ml-MLB7", "loja": "mercadolivre", "id_ml": "MLB7", "nome": "A",
+                                                "preco": 40, "preco_alvo": 50, "link_afiliado": "https://meli.la/a"}]}
+        def site_json(n):
+            return site if n == "products.json" else ach
+        def bloqueia(i):
+            raise sr.Blocked("Mercado Livre bloqueou a página de um achadinho")
+        with patch("config.AMAZON_TAG", "x-20"), patch.object(sr, "_site_json", site_json), \
+                patch.object(sr, "collect_ml", lambda cats: {"lego": []}), patch.object(sr, "ml_price", bloqueia), \
+                patch.object(sr, "_pause", lambda: None), patch("core.notifier.notify_admin", lambda *a, **k: None):
+            st = sr.run(publish=False, escopo={"cats": ["lego"], "lojas": ["mercadolivre"], "achadinhos": True})
+        self.assertEqual(st["status"], "ok")
+        self.assertTrue(any("Achadinhos do ML não atualizados" in a for a in st["plano_b"]))
+
     def test_marca_que_sumiu_nao_pausa_o_ml(self):
         pages = {sr.ML + "/mais-vendidos/MLB2097": ML_PAGE.replace(">Mini GT<", ">Outra marca<")}
         def page(u):
