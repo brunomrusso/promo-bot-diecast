@@ -332,5 +332,20 @@ class SiteAchadinhosTests(unittest.TestCase):
             self.assertEqual([i["id"] for i in sent[-1]["itens"]], ["ach-ml-MLB1"])
 
 
+class MiniSugestaoTests(unittest.TestCase):
+    def test_suggest_from_titles(self):
+        from core.mini_sugestao import suggest
+        s = suggest({"title": "Miniatura Mini GT 1:64 Nissan Skyline GT-R (R34) V-Spec II", "price": 89.9,
+                     "id": "ml-1", "store": "Mercado Livre", "url": "u", "image": "i"})
+        self.assertEqual((s["site_category"], s["required_terms"].split(", ")[:2]), ("mini-gt", ["mini gt", "r34"]))
+        self.assertTrue(s["search_terms"].startswith("mini gt nissan skyline"))
+        self.assertEqual((s["observed_price"], s["store"], s["product_id"]), (89.9, "Mercado Livre", "ml-1"))
+        hw = suggest({"title": "Hot Wheels Premium Car Culture '84 Mustang SVO Power Trip Mattel"})
+        self.assertEqual(hw["required_terms"], "hot wheels, 84, mustang, svo")
+        self.assertEqual(hw["search_terms"].split(";")[0], "hot wheels 84 mustang svo")
+        self.assertEqual(suggest({"title": "Carros Disney Pixar Relâmpago McQueen Mattel 1:55"})["site_category"], "pixar-cars")
+        self.assertEqual(suggest({"title": "Carrinho Hot Wheels Koenigsegg CC850 Prata"})["cores_no_titulo"], ["prata"])
+
+
 if __name__ == "__main__":
     unittest.main()

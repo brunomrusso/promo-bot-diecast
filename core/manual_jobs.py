@@ -774,6 +774,9 @@ def process_jobs(urgent_only=False):
                 deal = extract_link(payload["url"])
                 if deal.get("_error"):
                     raise ValueError(deal["_error"])
+                if payload.get("only_data"):  # cadastro de mini pelo link: só os dados, sem gerar link de afiliado
+                    db.finish_job(row["id"], deal)
+                    continue
                 stage_start = time.monotonic()
                 link = deal.get("affiliate_url") or to_affiliate_url(deal)
                 deal["monetization_seconds"] = round(time.monotonic() - stage_start, 3)

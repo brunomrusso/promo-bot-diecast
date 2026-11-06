@@ -580,7 +580,17 @@ def api_extract():
         return jsonify({"error": "Finalize a verificação do Mercado Livre antes de buscar produtos."}), 409
     if not health.bot_indicator()["online"]:
         return jsonify({"error": "O bot está parado e não pode processar a busca agora."}), 503
-    return jsonify({"job_id": db.create_job("extract", {"url": url})})
+    return jsonify({"job_id": db.create_job("extract", {"url": url, "only_data": bool(request.json.get("only_data"))})})
+
+
+@app.post("/api/monitored/sugestao")
+@login_required
+def api_monitored_sugestao():
+    from core import mini_sugestao
+    deal = (request.get_json(silent=True) or {}).get("deal") or {}
+    if not deal.get("title"):
+        return jsonify({"error": "Não consegui ler o nome do produto nesse link."}), 400
+    return jsonify(mini_sugestao.suggest(deal))
 
 
 @app.post("/api/publish")

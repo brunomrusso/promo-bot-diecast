@@ -10,6 +10,9 @@
     <div class="monitored-create-fields" id="monitored-create-fields">
       <input type="hidden" name="observed_price" value="{{ request.args.get('observed_price', '') }}"><input type="hidden" name="product_id" value="{{ request.args.get('product_id', '') }}"><input type="hidden" name="store" value="{{ request.args.get('store', '') }}"><input type="hidden" name="source_url" value="{{ request.args.get('url', '') }}"><input type="hidden" name="image" value="{{ request.args.get('image', '') }}">
       <div class="wide"><small>NOVO MONITORAMENTO</small><h2>Cadastrar mini desejada</h2><p>Somente produtos deste catálogo ativo são pesquisados. O bot aprende em silêncio e envia uma oportunidade para revisão ao atingir seu alvo ou identificar preço bom com histórico confiável. Não publica automaticamente.</p></div>
+      <div class="wide mini-link"><label for="mini-link-url">Preencher pelo link do produto (opcional)</label>
+        <div class="mini-link-row"><input type="url" id="mini-link-url" inputmode="url" autocomplete="off" placeholder="Link do Mercado Livre ou da Amazon"><button type="button" class="button" id="mini-link-go">Preencher</button></div>
+        <div id="mini-link-msg" class="mini-link-msg" aria-live="polite"></div></div>
       <label class="wide">Nome para identificação<input name="name" value="{{ request.args.get('name', '') }}" placeholder="Mini GT Nissan Skyline R34" required></label>
       <label class="wide">Termo usado na busca (use ; para buscas alternativas)<input name="search_terms" value="{{ request.args.get('search_terms', '') }}" placeholder="mini gt skyline r34; nissan skyline r34 mini gt" required></label>
       <label class="wide">Termos obrigatórios, separados por vírgula<input name="required_terms" value="{{ request.args.get('required_terms', '') }}" placeholder="mini gt, skyline, r34" required></label>
@@ -130,4 +133,23 @@ document.querySelectorAll('[data-cancel-mini]').forEach(button=>button.addEventL
 document.addEventListener('click',event=>document.querySelectorAll('.monitored-menu[open]').forEach(menu=>{if(!menu.contains(event.target))menu.removeAttribute('open')}));
 document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelectorAll('.monitored-menu[open]').forEach(menu=>{menu.removeAttribute('open');menu.querySelector('summary').focus()})});
 </script>
+<script>
+(()=>{const go=document.getElementById('mini-link-go');if(!go)return;const inp=document.getElementById('mini-link-url'),msg=document.getElementById('mini-link-msg'),form=go.closest('form');
+const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const set=(n,v)=>{const el=form.querySelector('[name="'+n+'"]');if(el&&v!==undefined&&v!==null)el.value=v};
+inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();go.click()}});
+go.onclick=async()=>{const url=inp.value.trim();if(!/^https?:\/\//.test(url)){msg.innerHTML='<div class="flash error">Cole o link completo do produto.</div>';return}
+ go.disabled=true;go.textContent='Lendo…';msg.innerHTML='<p class="health-note">Lendo o produto (alguns segundos)…</p>';
+ try{const r=await fetch('/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,only_data:true})});const d=await r.json();if(!r.ok)throw new Error(d.error);
+  let deal=null;for(let i=0;i<45&&!deal;i++){await new Promise(z=>setTimeout(z,2000));const j=await (await fetch('/api/jobs/'+d.job_id)).json();if(j.status==='error')throw new Error(j.error);if(j.status==='done')deal=j.result}
+  if(!deal)throw new Error('O bot está ocupado; tente de novo em instantes.');
+  const s2=await fetch('/api/monitored/sugestao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal})});const g=await s2.json();if(!s2.ok)throw new Error(g.error);
+  ['name','search_terms','required_terms','forbidden_terms','observed_price','product_id','store','source_url','image'].forEach(n=>set(n,g[n]));
+  if(g.site_category)set('site_category',g.site_category);
+  const cor=g.cores_no_titulo&&g.cores_no_titulo.length?'<br>O título cita a cor <b>'+esc(g.cores_no_titulo.join(', '))+'</b>: se quiser só essa versão, coloque a cor nos termos obrigatórios.':'';
+  msg.innerHTML='<div class="mini-link-card">'+(g.image?'<img src="'+esc(g.image)+'" alt="" referrerpolicy="no-referrer">':'')+'<div><strong>'+esc(g.titulo)+'</strong><span>'+esc(g.store)+(g.observed_price?' · R$ '+Number(g.observed_price).toFixed(2).replace('.',','):'')+'</span><span class="mini-link-ok">Campos preenchidos. Confira os termos antes de salvar.'+cor+'</span></div></div>';
+  form.querySelector('[name="name"]').focus()}catch(e){msg.innerHTML='<div class="flash error">'+esc(e.message||'Erro')+'</div>'}finally{go.disabled=false;go.textContent='Preencher'}};
+})();
+</script>
+<style>.mini-link-row{display:flex;gap:8px;margin-top:6px}.mini-link-row input{flex:1;min-width:0;margin:0}.mini-link-row .button{flex:none}.mini-link-msg .flash{margin-top:8px}.mini-link-card{display:flex;gap:12px;align-items:center;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:12px}.mini-link-card img{width:64px;height:64px;object-fit:contain;border-radius:8px;background:#fff;flex:none}.mini-link-card strong{display:block;font-size:13px;line-height:1.3}.mini-link-card span{display:block;font-size:12px;color:var(--muted);margin-top:3px}.mini-link-card .mini-link-ok{color:var(--accent)}@media(max-width:600px){.mini-link-row{flex-direction:column}.mini-link-row .button{width:100%}}</style>
 {% endblock %}
