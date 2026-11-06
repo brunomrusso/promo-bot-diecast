@@ -190,6 +190,75 @@ def ml_items(html):
     return [x for x in items if x["id"] and x["preco"] and x["k"] and x["pos"]]
 
 
+def _nordic_state(html):
+    """JSON que o ML embute na página (__NORDIC_RENDERING_CTX__): plano B quando o HTML muda de formato."""
+    m = re.search(r'<script[^>]*id="__NORDIC_RENDERING_CTX__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return None
+    txt = m.group(1)
+    i = txt.find("{")
+    if i < 0:
+        return None
+    try:
+        return json.JSONDecoder().raw_decode(txt, i)[0]
+    except ValueError:
+        return None
+
+
+def _find_polycards(x, depth=0):
+    if depth > 12:
+        return None
+    if isinstance(x, dict):
+        if isinstance(x.get("polycards"), list) and x["polycards"]:
+            return x["polycards"]
+        for v in x.values():
+            r = _find_polycards(v, depth + 1)
+            if r:
+                return r
+    elif isinstance(x, list):
+        for v in x[:30]:
+            r = _find_polycards(v, depth + 1)
+            if r:
+                return r
+    return None
+
+
+def ml_items_json(html):
+    """Mesmos campos de ml_items, lidos do JSON embutido (não depende das classes CSS da página)."""
+    cards = _find_polycards(_nordic_state(html) or {}) or []
+    items = []
+    for n, pc in enumerate(cards, 1):
+        meta = pc.get("metadata") or {}
+        comps = {c.get("type"): c for c in pc.get("components") or [] if isinstance(c, dict)}
+        title = (((comps.get("title") or {}).get("title") or {}).get("text") or "").strip()
+        price = ((((comps.get("price") or {}).get("price") or {}).get("current_price") or {}).get("value")
+                 or (meta.get("signal") or {}).get("prc"))
+        pics = (pc.get("pictures") or {}).get("pictures") or []
+        key = pics[0].get("id") if pics and isinstance(pics[0], dict) else None
+        hl = (((pc.get("float_highlight_generic") or {}).get("highlight") or {}).get("text") or "")
+        pos = re.search(r"(\d+)\s*[º°o]\s*mais vendido", hl, re.I)
+        items.append({"t": title, "id": _ml_id("/" + (meta.get("url") or "")) or meta.get("id"),
+                      "preco": round(float(price), 2) if price else None,
+                      "k": key if key and re.fullmatch(r"\d+-ML[AB]U?\d+_\d+", key) else None,
+                      "pos": int(pos.group(1)) if pos else n})
+    return [x for x in items if x["t"] and x["id"] and x["preco"] and x["k"]]
+
+
+_avisos = []  # usos do plano B nesta execução (vão no aviso do Telegram e no painel)
+
+
+def ml_items_any(html, onde=""):
+    """Lê pelo HTML; se vier quase vazio, tenta o JSON embutido. Usa o que trouxer mais itens."""
+    a = ml_items(html)
+    if len(a) >= 3:
+        return a
+    b = ml_items_json(html)
+    if len(b) > len(a):
+        _avisos.append(f"ML {onde}: lido pelo plano B (JSON da página), {len(b)} itens")
+        return b
+    return a
+
+
 def az_ranking(html):
     """[(asin, rank)] do data-client-recs-list e {asin: título} pelos alt das imagens."""
     soup = BeautifulSoup(html, "html.parser")
@@ -398,6 +467,7 @@ _cur = {}  # estado da rodada em andamento (o painel mostra etapa e %)
 
 
 CANCEL_KEY = "site_ranking_cancel"
+ML_LINKS_KEY = "site_ranking_ml_links"  # último link que funcionou de cada filtro do ML (plano B)
 
 
 class Cancelled(BaseException):  # BaseException: nenhum "except Exception" interno engole o cancelamento
@@ -475,14 +545,22 @@ def collect_ml(cats=None):
     for n, (c, (start, path)) in enumerate(fontes):
         _progress(f"Mercado Livre: {NOMES[c]} ({n + 1} de {len(fontes)})", 2 + 42 * n / len(fontes))
         html = _ml_page_html(ML + start)
+        cache = db.get_setting(ML_LINKS_KEY, {}) or {}
         for name in path:
             links = ml_links(html)
             url = links.get(norm(name)) or next((u for t, u in links.items() if t.startswith(norm(name))), None)
-            if not url:
+            ck = f"{c}|{norm(name)}"
+            if url:
+                cache[ck] = url
+            elif cache.get(ck):  # plano B: o link do filtro sumiu da página, usa o último que funcionou
+                url = cache[ck]
+                _avisos.append(f"ML {NOMES[c]}: filtro '{name}' não apareceu na página; usei o último link conhecido")
+            else:
                 raise Unsafe(f"ML: não achei o filtro '{name}' em {c}")
             _pause()
             html = _ml_page_html(url)
-        raw[c] = ml_items(html)
+        db.set_setting(ML_LINKS_KEY, cache)
+        raw[c] = ml_items_any(html, NOMES[c])
         _pause()
     return pick_ml(raw)
 
@@ -600,6 +678,7 @@ def run(publish=False, origem="painel", escopo=None):
              "escopo": esc, "escopo_txt": escopo_label(esc)}
     _cur.clear()
     _cur.update(state)
+    _avisos.clear()
     db.set_setting(CANCEL_KEY, None)
     db.set_system_state(STATE_KEY, state)
     try:
@@ -641,6 +720,7 @@ def run(publish=False, origem="painel", escopo=None):
                      novos=report["novos"][:40], removidos=report["removidos"][:40],
                      precos=report["precos"][:40], n_precos=len(report["precos"]), sem_link=report["sem_link"][:20],
                      itens_app=sum(1 for i in ach.get("itens", []) if i.get("origem") == "app"),
+                     plano_b=list(_avisos),
                      fim=datetime.now(ZONE).isoformat(timespec="seconds"))
     except Cancelled:
         state.update(status="cancelado", publicado=False, erro="Cancelado pelo painel. Nada foi publicado.",
@@ -677,6 +757,8 @@ def run(publish=False, origem="painel", escopo=None):
                 f"ML {ml} · Amazon {az} produtos · {len(state['novos'])} novos · {len(state['removidos'])} saíram · "
                 f"{state['n_precos']} preços mudaram" + (f" · {len(state['sem_link'])} sem link" if state["sem_link"] else "")
                 + (f"\n✔️ Voltou a funcionar depois de {falhas_antes} falha(s)." if falhas_antes else "")
+                + ("\n⚙️ Plano B usado (a página do ML mudou; mande isto para o Claude): " + "; ".join(state["plano_b"])
+                   if state.get("plano_b") else "")
                 + f"\nDetalhes: {getattr(config, 'PANEL_URL', '') or 'https://painel.russodiecast.online'}/site")
         except Exception:
             pass

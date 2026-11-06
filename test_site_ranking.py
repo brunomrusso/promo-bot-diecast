@@ -23,6 +23,20 @@ ML_PAGE = """
 AZ_PAGE = """<div data-client-recs-list='[{"id":"B000GKUEVE","metadataMap":{"render.zg.rank":"1"}},{"id":"B0AAAAAAAA","metadataMap":{"render.zg.rank":"2"}}]'></div>
 <div id="gridItemRoot"><a href="/Hot-Wheels/dp/B000GKUEVE/ref=x"><img alt="Hot Wheels Pacote com 5 | Mattel"></a></div>"""
 
+ML_JSON_PAGE = ("<html><body><div class='layout-novo'></div><script id=\"__NORDIC_RENDERING_CTX__\">_n.ctx.r=" + json.dumps({
+    "appProps": {"pageProps": {"initialState": {"results": [{"trends_categories": {"polycards": [
+        {"metadata": {"id": "MLB7358347786", "url": "www.mercadolivre.com.br/conjunto/p/MLB35762220"},
+         "pictures": {"pictures": [{"id": "724815-MLA99876815105_112025"}]},
+         "float_highlight_generic": {"highlight": {"text": "1º MAIS VENDIDO"}},
+         "components": [{"type": "title", "title": {"text": "Conjunto 5 Carrinhos Hot Wheels"}},
+                        {"type": "price", "price": {"current_price": {"value": 72.99}}}]},
+        {"metadata": {"id": "MLB1", "url": "www.mercadolivre.com.br/x/up/MLBU4204668530", "signal": {"prc": 21.99}},
+         "pictures": {"pictures": [{"id": "678948-MLA94869475485_102025"}]},
+         "float_highlight_generic": {"highlight": {"text": "2º MAIS VENDIDO"}},
+         "components": [{"type": "title", "title": {"text": "Carrinho Hot Wheels 2026"}}]},
+        {"metadata": {"url": "www.mercadolivre.com.br/y/p/MLB9"}, "components": []}]}}]}}}})
+    + ";_n.ctx.r.assets={}</script></body></html>")
+
 
 class SiteRankingTests(unittest.TestCase):
     def setUp(self):
@@ -88,6 +102,30 @@ class SiteRankingTests(unittest.TestCase):
         self.assertNotIn("preco", p["az-hot-wheels-02"])
         self.assertTrue(any("Saiu" in r for r in rep["removidos"]))
         self.assertEqual([x["id"] for x in out["produtos"]][:2], ["hot-wheels-01", "hot-wheels-02"])
+
+    def test_ml_plano_b_json(self):
+        self.assertEqual(sr.ml_items(ML_JSON_PAGE), [])
+        sr._avisos.clear()
+        items = sr.ml_items_any(ML_JSON_PAGE, "Hot Wheels")
+        self.assertEqual([(i["id"], i["pos"], i["preco"]) for i in items], [("MLB35762220", 1, 72.99), ("MLBU4204668530", 2, 21.99)])
+        self.assertEqual(items[0]["k"], "724815-MLA99876815105_112025")
+        self.assertIn("plano B", sr._avisos[0])
+        sr._avisos.clear()
+        self.assertEqual(len(sr.ml_items_any(ML_PAGE)), 2)  # HTML normal: não usa o plano B... (só 2 itens válidos, JSON vazio)
+        self.assertEqual(sr._avisos, [])
+
+    def test_ml_filter_link_cache(self):
+        pages = {sr.ML + "/mais-vendidos/MLB2097": ML_PAGE}
+        with patch.object(sr, "_ml_page_html", lambda u: pages.get(u, ML_PAGE)), patch.object(sr, "_pause", lambda: None):
+            sr._avisos.clear()
+            sr.collect_ml(["mini-gt"])
+            self.assertTrue(db.get_setting(sr.ML_LINKS_KEY)["mini-gt|mini gt"].startswith("https://www.mercadolivre.com.br/mais-vendidos/MLB2097"))
+            pages[sr.ML + "/mais-vendidos/MLB2097"] = "<html>sem links</html>"
+            sr.collect_ml(["mini-gt"])  # link sumiu: usa o último que funcionou, não para
+            self.assertTrue(any("último link" in a for a in sr._avisos))
+            db.set_setting(sr.ML_LINKS_KEY, {})
+            with self.assertRaises(sr.Unsafe):
+                sr.collect_ml(["mini-gt"])
 
     def test_failure_alerts_once_then_on_third(self):
         site = {"categorias": [{"id": "lego"}], "produtos": []}
@@ -228,6 +266,70 @@ class SiteRankingTests(unittest.TestCase):
         out = sr.merge_partial(cur, new, {("mercadolivre", "hot-wheels")})
         self.assertEqual([(p["id"], p["v"]) for p in out["produtos"]],
                          [("hot-wheels-01", "novo"), ("hot-wheels-02", "novo"), ("az-hot-wheels-01", "velho"), ("lego-01", "velho")])
+
+
+class SiteAchadinhosTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.p = patch.object(db, "DB_PATH", Path(self.temp.name) / "deals.db")
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+        gc.collect()
+        self.temp.cleanup()
+
+    def test_parse_preco(self):
+        from core import site_achadinhos as sa
+        self.assertEqual([sa.parse_preco(v) for v in ["39,90", "R$ 1.299,90", "45.5", 30]], [39.9, 1299.9, 45.5, 30.0])
+        with self.assertRaises(ValueError):
+            sa.parse_preco("abc")
+
+    def test_build_ml_and_amazon(self):
+        from core import site_achadinhos as sa
+        ml = {"store": "Mercado Livre", "title": "Mini GT Nissan GT-R", "price": 89.9,
+              "url": "https://www.mercadolivre.com.br/x/p/MLB123456", "image": "https://http2.mlstatic.com/D_NQ_NP_612345-MLA9988776655_102025-O.webp"}
+        it = sa.build_item(ml, "https://meli.la/abc", 95.0, "mini-gt", "2026-11-06T10:00")
+        self.assertEqual((it["id"], it["ativo"], it["historico"][0]["data"]), ("ach-ml-MLB123456", True, "2026-11-06"))
+        self.assertTrue(it["imagem"].startswith("https://http2.mlstatic.com/D_NQ_NP_2X_"))
+        with self.assertRaises(ValueError):
+            sa.build_item(ml, "https://www.mercadolivre.com.br/x", 95.0, None, "2026-11-06T10:00")  # sem meli.la
+        az = {"store": "Amazon", "title": "LEGO 31134 | Ônibus", "price": 63.99, "url": "https://www.amazon.com.br/dp/B0AAAAAAAA"}
+        with patch("config.AMAZON_TAG", "promocoesdiec-20"):
+            a = sa.build_item(az, "", 60.0, "lego", "2026-11-06T10:00")
+        self.assertEqual(a["link_afiliado"], "https://www.amazon.com.br/dp/B0AAAAAAAA?tag=promocoesdiec-20")
+        self.assertNotIn("preco", a)
+        self.assertNotIn("imagem", a)
+
+    def test_upsert_and_remove_respect_app_items(self):
+        from core import site_achadinhos as sa
+        data = {"atualizado_em": "x", "itens": [{"id": "ach-ml-MLB1", "origem": "app"}, {"id": "ach-ml-MLB2", "preco": 50, "preco_alvo": 40}]}
+        new, acao = sa.upsert(data, {"id": "ach-ml-MLB2", "preco_alvo": 55, "categoria": "lego"})
+        self.assertEqual((acao, new["itens"][1]["ativo"], new["itens"][1]["preco_alvo"]), ("atualizado", True, 55))
+        with self.assertRaises(ValueError):
+            sa.upsert(data, {"id": "ach-ml-MLB1", "preco_alvo": 1, "categoria": None})
+        new, _ = sa.upsert(data, {"id": "ach-az-B0X", "preco_alvo": 9, "categoria": None})
+        self.assertEqual(len(new["itens"]), 3)
+        new, alvo = sa.remove_from(data, "ach-ml-MLB2")
+        self.assertEqual([i["id"] for i in new["itens"]], ["ach-ml-MLB1"])
+        with self.assertRaises(ValueError):
+            sa.remove_from(data, "ach-ml-MLB1")  # do app
+
+    def test_add_publishes_on_freshest_file(self):
+        from core import site_achadinhos as sa
+        site = {"atualizado_em": "x", "itens": [{"id": "ach-ml-MLB1", "origem": "app"}]}
+        sent = []
+        deal = {"store": "Mercado Livre", "title": "Hot Wheels Premium", "price": 30.0, "affiliate_url": "https://meli.la/zz",
+                "url": "https://www.mercadolivre.com.br/up/MLBU999", "image": "https://http2.mlstatic.com/D_Q_NP_611111-MLA2222222222_102025-O.webp"}
+        def up(content, name):
+            sent.append(json.loads(content)); site.update(json.loads(content))
+        with patch("core.site_export._fetch_named", lambda n: json.loads(json.dumps(site))), \
+                patch("core.site_export._upload", up), patch("core.site_ranking._backup_local", lambda *a: None):
+            r = sa.add("https://meli.la/zz", "35,00", "hot-wheels", extract=lambda u: dict(deal))
+            self.assertEqual((r["acao"], r["ativo"]), ("adicionado", True))
+            self.assertEqual([i["id"] for i in sent[-1]["itens"]], ["ach-ml-MLB1", "ach-ml-MLBU999"])
+            sa.remove("ach-ml-MLBU999")
+            self.assertEqual([i["id"] for i in sent[-1]["itens"]], ["ach-ml-MLB1"])
 
 
 if __name__ == "__main__":

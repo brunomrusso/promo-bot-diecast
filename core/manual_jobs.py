@@ -917,6 +917,10 @@ def process_jobs(urgent_only=False):
                 })
             elif row["action"] == "publish":
                 db.finish_job(row["id"], publish_deal(payload["deal"]))
+            elif row["action"] == "site_achadinho_add":
+                from core import site_achadinhos
+                db.finish_job(row["id"], site_achadinhos.add(payload.get("url", ""), payload.get("preco_alvo"),
+                                                             payload.get("categoria")))
             elif row["action"] == "site_ranking_publish_preview":
                 from core import site_ranking
                 db.finish_job(row["id"], site_ranking.publish_preview())

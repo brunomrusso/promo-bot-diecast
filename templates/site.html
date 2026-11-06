@@ -10,6 +10,7 @@
     {% if rk.status == 'ok' and not rk.publicado %}<p>Confira os números abaixo. Se estiver tudo certo, clique em <b>Publicar esta prévia</b> (vale por 6 h).</p>{% endif %}
     <p>{% if rk.fim %}{{ rk.fim[8:10] }}/{{ rk.fim[5:7] }} às {{ rk.fim[11:16] }} · {{ rk.origem }} · {{ (rk.duracao or 0)//60 }} min {{ (rk.duracao or 0)%60 }} s{% elif rk.inicio %}Começou às {{ rk.inicio[11:16] }}{% endif %}</p>
     {% if rk.erro %}<p class="bad">{{ rk.erro }}</p><p>O site continua com a versão anterior.</p>{% endif %}
+    {% if rk.plano_b %}<p class="health-note">⚙️ Plano B usado (a página do Mercado Livre mudou, mas deu para ler): {{ rk.plano_b|join('; ') }}. Avise o Claude.</p>{% endif %}
   </div>
   <div class="site-actions">
     {% if rk.status == 'ok' and not rk.publicado %}<button class="primary" id="rk-approve">Publicar esta prévia</button>{% endif %}
@@ -44,6 +45,45 @@
   <p class="health-note">Horário de Brasília. Cada horário roda uma vez por dia; se o bot estiver ocupado, ele roda assim que puder (até 90 min depois). Até 12 horários.</p>
 </section>
 
+<section class="panel ach-panel" id="ach">
+  <div class="rk-scope-head"><div><small>ACHADINHOS NO PRECINHO</small><h2>Cadastrar achadinho</h2></div></div>
+  <form id="ach-form" class="ach-form" autocomplete="off">
+    <input type="url" id="ach-url" placeholder="Link do Mercado Livre ou da Amazon" required aria-label="Link do produto">
+    <input type="text" id="ach-preco" inputmode="decimal" placeholder="Preço máx. (39,90)" required aria-label="Preço máximo">
+    <select id="ach-cat" aria-label="Categoria"><option value="">Sem categoria</option>{% for c in cats %}<option value="{{ c }}">{{ lbl[c] }}</option>{% endfor %}</select>
+    <button type="submit" class="primary" id="ach-add">Adicionar</button>
+  </form>
+  <p class="health-note">Aparece no site enquanto o preço estiver até o máximo. Mercado Livre: o bot confere o preço nos horários da agenda. Amazon: o site usa o preço da Amazon na hora. Se o produto já existir, só o preço máximo e a categoria mudam.</p>
+  <div id="ach-msg"></div>
+  <div id="ach-list" class="ach-list"><p class="empty">Carregando…</p></div>
+</section>
+<script>
+(()=>{const lbl={{ nomes|tojson }},list=document.getElementById('ach-list'),msg=document.getElementById('ach-msg'),form=document.getElementById('ach-form'),btn=document.getElementById('ach-add');
+const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const brl=v=>typeof v==='number'?v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}):'';
+const flash=(t,bad)=>msg.innerHTML='<div class="flash'+(bad?' error':'')+'">'+esc(t)+'</div>';
+async function load(){try{const r=await fetch('/api/site/achadinhos');const d=await r.json();if(!r.ok)throw new Error(d.error);
+ const it=d.itens||[];if(!it.length){list.innerHTML='<p class="empty">Nenhum achadinho manual. Os do app ('+(d.do_app||0)+') são cadastrados pela mini monitorada.</p>';return}
+ list.innerHTML=it.map(x=>{const ml=x.loja!=='amazon',on=ml?x.ativo:null;
+  return '<div class="ach-item"><div class="ach-main"><strong>'+esc(x.nome)+'</strong><span class="ach-meta"><span class="pill">'+(ml?'Mercado Livre':'Amazon')+'</span>'+(x.categoria?'<span>'+esc(lbl[x.categoria]||x.categoria)+'</span>':'')+
+  (ml?'<span>'+brl(x.preco)+' · máx. '+brl(x.preco_alvo)+'</span><span class="'+(on?'ok':'bad')+'">'+(on?'no site':'acima do máximo')+'</span>':'<span>máx. '+brl(x.preco_alvo)+' · preço da Amazon na hora</span>')+
+  '</span></div><button type="button" class="icon-btn" data-rm="'+esc(x.id)+'" aria-label="Remover '+esc(x.nome)+'">✕</button></div>'}).join('')+
+  '<p class="health-note">'+(d.do_app||0)+' achadinhos do app (minis monitoradas) não aparecem aqui.</p>';
+ }catch(e){list.innerHTML='<p class="bad">'+esc(e.message||'Erro ao carregar')+'</p>'}}
+list.onclick=async e=>{const b=e.target.closest('[data-rm]');if(!b||!confirm('Remover este achadinho do site?'))return;b.disabled=true;
+ const r=await fetch('/api/site/achadinhos/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.dataset.rm})});const d=await r.json();
+ if(r.ok){flash('Removido: '+d.removido);load()}else{b.disabled=false;flash(d.error||'Erro',true)}};
+form.onsubmit=async e=>{e.preventDefault();btn.disabled=true;btn.textContent='Adicionando…';flash('Lendo o produto e gerando o link de afiliado (até 1 min)…');
+ try{const r=await fetch('/api/site/achadinhos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:document.getElementById('ach-url').value,preco_alvo:document.getElementById('ach-preco').value,categoria:document.getElementById('ach-cat').value})});
+  const d=await r.json();if(!r.ok)throw new Error(d.error);
+  for(let i=0;i<60;i++){await new Promise(z=>setTimeout(z,2000));const j=await (await fetch('/api/jobs/'+d.job_id)).json();
+   if(j.status==='pending'&&i===5)flash('Na fila: o bot termina o que está fazendo e já faz este.');
+   if(j.status==='error')throw new Error(j.error);
+   if(j.status==='done'){const x=j.result||{};flash((x.acao==='atualizado'?'Atualizado: ':'Adicionado: ')+x.nome+(x.loja==='mercadolivre'?(x.ativo?' · já está no site':' · fora do site até o preço chegar no máximo'):''));form.reset();load();return}}
+  flash('Ainda processando; confira a lista em alguns minutos.')}catch(e){flash(e.message||'Erro',true)}finally{btn.disabled=false;btn.textContent='Adicionar'}};
+load()})();
+</script>
+<style>.ach-panel{margin-bottom:20px}.ach-form{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1fr) minmax(0,1fr) auto;gap:10px;margin-top:14px}.ach-form input,.ach-form select{margin:0;width:100%;min-width:0}.ach-list{margin-top:8px}.ach-item{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}.ach-main{flex:1;min-width:0}.ach-main strong{display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ach-meta{display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:4px;font-size:12px;color:var(--muted);align-items:center}.ach-meta .ok{color:#7ad27a}.ach-item .icon-btn{width:36px;height:36px;flex:none}#ach-msg .flash{margin-top:10px}@media(max-width:700px){.ach-form{grid-template-columns:1fr 1fr}.ach-form #ach-url{grid-column:1/-1}.ach-form button{grid-column:1/-1}.ach-main strong{white-space:normal}}</style>
 <section class="health-grid">
   <div class="panel">
     <small>MODO DOS HORÁRIOS</small>

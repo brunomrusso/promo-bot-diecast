@@ -1,5 +1,6 @@
 import hmac
 import os
+import re
 from datetime import datetime, timezone
 from functools import wraps
 from urllib.parse import urlparse
@@ -643,6 +644,41 @@ def api_site_ranking_status():
     from core import site_ranking
     st = db.get_system_state().get(site_ranking.STATE_KEY) or {}
     return jsonify({"state": st.get("value") or {}, "updated_at": st.get("updated_at")})
+
+
+@app.get("/api/site/achadinhos")
+@login_required
+def api_site_achadinhos():
+    from core import site_achadinhos
+    try:
+        return jsonify(site_achadinhos.list_manual())
+    except Exception as exc:
+        return jsonify({"error": f"Não consegui ler o achadinhos.json do site: {exc}"}), 502
+
+
+@app.post("/api/site/achadinhos")
+@login_required
+def api_site_achadinhos_add():
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if not re.match(r"^https?://", url):
+        return jsonify({"error": "Cole o link do produto (Mercado Livre ou Amazon)."}), 400
+    if not str(data.get("preco_alvo") or "").strip():
+        return jsonify({"error": "Informe o preço máximo."}), 400
+    return jsonify({"job_id": db.create_job("site_achadinho_add", {
+        "url": url, "preco_alvo": data.get("preco_alvo"), "categoria": data.get("categoria") or None})})
+
+
+@app.post("/api/site/achadinhos/remove")
+@login_required
+def api_site_achadinhos_remove():
+    from core import site_achadinhos
+    try:
+        return jsonify(site_achadinhos.remove((request.get_json(silent=True) or {}).get("id", "")))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Não consegui publicar: {exc}"}), 502
 
 
 @app.post("/api/site/ranking/cancel")
