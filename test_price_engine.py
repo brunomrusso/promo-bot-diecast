@@ -31,17 +31,23 @@ class PriceEngineTests(unittest.TestCase):
         self.path_patch = patch.object(db, "DB_PATH", Path(self.temp.name) / "deals.db")
         self.path_patch.start()
 
-    def test_ml_consultado_no_maximo_de_hora_em_hora(self):
-        import main
-        with patch("main.time.time", return_value=1_000_000.0):
-            self.assertTrue(main._ml_na_vez())
-        with patch("main.time.time", return_value=1_000_000.0 + 15 * 60):
-            self.assertFalse(main._ml_na_vez())  # 15 min depois: pula o ML
-        with patch("main.time.time", return_value=1_000_000.0 + 60 * 60):
-            self.assertTrue(main._ml_na_vez())
-        db.set_setting("ml_intervalo_min", 15)
-        with patch("main.time.time", return_value=1_000_000.0 + 75 * 60):
-            self.assertTrue(main._ml_na_vez())
+    def test_navegador_do_ml_respeita_a_janela_e_tempos_configuraveis(self):
+        import config
+        import scrapers
+        config.clear_dynamic_cache()
+        t0 = 1_000_000.0
+        with patch("time.time", return_value=t0):
+            self.assertTrue(scrapers.navegador_ml_liberado())
+        with patch("time.time", return_value=t0 + 120):
+            self.assertTrue(scrapers.navegador_ml_liberado())  # mesmo ciclo: as outras buscas passam
+        with patch("time.time", return_value=t0 + 20 * 60):
+            self.assertFalse(scrapers.navegador_ml_liberado())  # fora da janela de 60 min
+        with patch("time.time", return_value=t0 + 60 * 60):
+            self.assertTrue(scrapers.navegador_ml_liberado())
+        db.set_setting("tempos_busca", {"ciclo_min": 2, "termos_por_ciclo": 5, "ml_navegador_min": 30})
+        config.clear_dynamic_cache()
+        self.assertEqual(config.tempos(), {"ciclo_min": 5, "termos_por_ciclo": 5, "ml_navegador_min": 30})  # 2 -> mínimo 5
+        config.clear_dynamic_cache()
 
     def tearDown(self):
         self.path_patch.stop()

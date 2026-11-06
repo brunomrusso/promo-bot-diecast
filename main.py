@@ -30,18 +30,6 @@ def _is_quiet():
     return start <= now < end
 
 
-def _ml_na_vez():
-    """Proxy residencial é cobrado por GB: as buscas das minis no ML rodam no máximo a cada N minutos
-    (setting ml_intervalo_min ou .env ML_INTERVALO_MIN; padrão 60). As outras lojas seguem a cada ciclo."""
-    minutos = int(db.get_setting("ml_intervalo_min", None) or os.getenv("ML_INTERVALO_MIN") or 60)
-    agora = time.time()
-    ultimo = float((db.get_system_state().get("ml_ultima_busca") or {}).get("value") or 0)
-    if agora - ultimo < minutos * 60 - 30:
-        return False
-    db.set_system_state("ml_ultima_busca", agora)
-    return True
-
-
 def _check_deals():
     reset_comparison_budget()
     manual_jobs.process_jobs()
@@ -64,12 +52,10 @@ def _check_deals():
                 and not ml_available()):
             db.update_store_health(store_name, "blocked", error="Verificação manual necessária")
             continue
-        if store_name == "Mercado Livre" and not _ml_na_vez():
-            continue  # economia de proxy: o ML é consultado no máximo a cada ML_INTERVALO_MIN minutos
         state_key = f"catalog_cursor_{store_name}"
         state = db.get_system_state().get(state_key)
         cursor = int(state["value"] if state else 0) % len(terms)
-        selected = [terms[(cursor + i) % len(terms)] for i in range(min(3, len(terms)))]
+        selected = [terms[(cursor + i) % len(terms)] for i in range(min(config.tempos()["termos_por_ciclo"], len(terms)))]
         db.set_system_state(state_key, cursor + len(selected))
         for keyword in selected:
             db.set_system_state("heartbeat", {"phase": "searching", "store": store_name, "keyword": keyword})
@@ -191,10 +177,10 @@ def main():
         time.sleep(60)  # dá tempo de aprovar pendentes via DM
         return
 
-    print(f"[*] agendado a cada {config.CHECK_INTERVAL_MINUTES} min. Ctrl+C p/ sair")
+    print(f"[*] agendado a cada {config.tempos()['ciclo_min']} min (ajustável no painel). Ctrl+C p/ sair")
     try:
         while True:
-            deadline = time.time() + config.CHECK_INTERVAL_MINUTES * 60
+            deadline = time.time() + config.tempos()["ciclo_min"] * 60
             last_heartbeat = 0
             while time.time() < deadline:
                 manual_jobs.process_jobs()

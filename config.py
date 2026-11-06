@@ -76,6 +76,26 @@ def ml_playwright_proxy():
     return proxy
 
 
+TEMPOS_PADRAO = {"ciclo_min": 15, "termos_por_ciclo": 3, "ml_navegador_min": 60}
+TEMPOS_LIMITES = {"ciclo_min": (5, 120), "termos_por_ciclo": (1, 20), "ml_navegador_min": (15, 1440)}
+
+
+def tempos():
+    """Tempos de busca (painel > Configurações > Tempos de busca). Valores fora dos limites voltam ao limite."""
+    salvo = _dynamic("tempos_busca", {}) or {}
+    base = dict(TEMPOS_PADRAO, ciclo_min=CHECK_INTERVAL_MINUTES,
+                ml_navegador_min=_env_int("ML_INTERVALO_MIN", TEMPOS_PADRAO["ml_navegador_min"]))
+    out = {}
+    for k, padrao in base.items():
+        try:
+            v = int(salvo.get(k) or padrao)
+        except (TypeError, ValueError):
+            v = padrao
+        lo, hi = TEMPOS_LIMITES[k]
+        out[k] = min(hi, max(lo, v))
+    return out
+
+
 def load_enabled_stores():
     fallback = [item.strip() for item in
                 os.getenv("ENABLED_STORES", "amazon,mercadolivre,shopee").split(",")

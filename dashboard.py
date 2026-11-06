@@ -907,6 +907,18 @@ def search_settings():
                                    "min_interval": interval, "timezone": "America/Sao_Paulo"})
         flash("Horários atualizados", "success")
         return redirect(url_for("search_settings", _anchor="publishing"))
+    if request.method == "POST" and request.form.get("section") == "tempos":
+        novos = {}
+        for k, (lo, hi) in config.TEMPOS_LIMITES.items():
+            v = request.form.get(k, type=int)
+            if v is None or not lo <= v <= hi:
+                flash(f"Valor inválido em '{k}': use entre {lo} e {hi}", "error")
+                return redirect(url_for("search_settings", _anchor="tempos"))
+            novos[k] = v
+        db.set_setting("tempos_busca", novos)
+        config.clear_dynamic_cache()
+        flash("Tempos salvos; valem a partir do próximo ciclo", "success")
+        return redirect(url_for("search_settings", _anchor="tempos"))
     if request.method == "POST":
         enabled = request.form.getlist("enabled_stores")
         if not enabled:
@@ -927,7 +939,8 @@ def search_settings():
         settings=db.get_setting("schedule", {"quiet_start": "23:00", "quiet_end": "08:00",
                                              "min_interval": 10, "timezone": "America/Sao_Paulo"}),
         enabled_stores=config.load_enabled_stores(),
-        approval_expiry_hours=db.get_setting("approval_expiry_hours", 24))
+        approval_expiry_hours=db.get_setting("approval_expiry_hours", 24),
+        tempos=config.tempos(), tempos_limites=config.TEMPOS_LIMITES)
 
 
 @app.route("/brand-rules", methods=["GET", "POST"])
