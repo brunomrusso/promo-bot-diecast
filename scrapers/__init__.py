@@ -12,10 +12,13 @@ except ImportError:  # playwright não instalado
 def search_mercadolivre(keyword: str, min_discount: int):
     """Prefere a API oficial (token OAuth); Playwright só como fallback."""
     if ml_api_ready():
-        return _search_ml_api(keyword, min_discount)
+        deals = _search_ml_api(keyword, min_discount)
+        if deals is not None:
+            return deals
+        print(f"[ML] API falhou em '{keyword}'; usando o navegador")
     if _search_ml_pw:
         return _search_ml_pw(keyword, min_discount)
-    return []
+    raise RuntimeError("API do Mercado Livre indisponível e Playwright não instalado")
 try:
     from .shopee_pw import search_shopee
 except ImportError:

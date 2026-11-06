@@ -1,0 +1,174 @@
+{% extends 'base.html' %}
+{% block title %}Site · RUSSO Diecast{% endblock %}
+{% block heading %}Site russodiecast.com.br{% endblock %}
+{% block content %}
+{% set lbl = nomes %}
+<section class="health-hero {{ 'critical' if rk.status == 'erro' else 'healthy' }}">
+  <div>
+    <small>RANKING DO SITE (MAIS VENDIDOS)</small>
+    <h2>{% if not rk %}Ainda não rodou{% elif rk.status == 'running' %}Atualizando agora…{% elif rk.status == 'erro' %}Última tentativa falhou{% elif rk.status == 'cancelado' %}Última execução cancelada{% elif rk.publicado %}Site atualizado{% else %}Prévia gerada (não publicada){% endif %}{% if rk.escopo_txt and rk.escopo_txt != 'tudo' %} · {{ rk.escopo_txt }}{% endif %}</h2>
+    {% if rk.status == 'ok' and not rk.publicado %}<p>Confira os números abaixo. Se estiver tudo certo, clique em <b>Publicar esta prévia</b> (vale por 6 h).</p>{% endif %}
+    <p>{% if rk.fim %}{{ rk.fim[8:10] }}/{{ rk.fim[5:7] }} às {{ rk.fim[11:16] }} · {{ rk.origem }} · {{ (rk.duracao or 0)//60 }} min {{ (rk.duracao or 0)%60 }} s{% elif rk.inicio %}Começou às {{ rk.inicio[11:16] }}{% endif %}</p>
+    {% if rk.erro %}<p class="bad">{{ rk.erro }}</p><p>O site continua com a versão anterior.</p>{% endif %}
+  </div>
+  <div class="site-actions">
+    {% if rk.status == 'ok' and not rk.publicado %}<button class="primary" id="rk-approve">Publicar esta prévia</button>{% endif %}
+    <button class="button" id="rk-preview">Gerar prévia (sem publicar)</button>
+    <button class="{{ 'button' if rk.status == 'ok' and not rk.publicado else 'primary' }}" id="rk-publish">Atualizar site agora</button>
+  </div>
+</section>
+<section class="panel rk-scope">
+  <div class="rk-scope-head"><div><small>O QUE ATUALIZAR</small><h2 id="rk-scope-txt">Tudo</h2></div>
+    <div class="rk-quick"><button type="button" class="button" data-quick="tudo">Tudo</button><button type="button" class="button" data-quick="ach">Só achadinhos</button><select id="rk-only" aria-label="Atualizar só uma categoria"><option value="">Só uma categoria…</option>{% for c in cats %}<option value="{{ c }}">Só {{ lbl[c] }}</option>{% endfor %}</select></div></div>
+  <div class="rk-chips">
+    {% for c in cats %}<label class="rk-chip"><input type="checkbox" name="cat" value="{{ c }}" checked><span>{{ lbl[c] }}</span></label>{% endfor %}
+  </div>
+  <div class="rk-chips">
+    <label class="rk-chip"><input type="checkbox" name="loja" value="mercadolivre" checked><span>Mercado Livre</span></label>
+    <label class="rk-chip"><input type="checkbox" name="loja" value="amazon" checked><span>Amazon</span></label>
+    <label class="rk-chip"><input type="checkbox" name="ach" checked><span>Achadinhos (preços do ML)</span></label>
+  </div>
+  <p class="health-note">Os botões "Gerar prévia" e "Atualizar site agora" usam esta escolha. O que não estiver marcado continua no site como está. Os horários automáticos seguem a agenda abaixo.</p>
+</section>
+<div id="rk-result"></div>
+<section class="panel rk-progress" id="rk-progress" hidden>
+  <div class="rk-row"><span class="rk-spin" aria-hidden="true"></span><strong id="rk-step">Começando…</strong><b id="rk-pct">0%</b></div>
+  <div class="rk-bar"><i id="rk-fill"></i></div>
+  <div class="rk-foot"><p id="rk-time" class="health-note"></p><button type="button" class="button" id="rk-cancel" hidden>Cancelar</button></div>
+</section>
+
+<section class="panel rk-agenda">
+  <div class="rk-scope-head"><div><small>HORÁRIOS AUTOMÁTICOS</small><h2>Agenda do site</h2></div>
+    <div class="rk-quick"><button type="button" class="button" id="ag-add">+ Adicionar horário</button><button type="button" class="primary" id="ag-save">Salvar agenda</button></div></div>
+  <div id="ag-list"></div>
+  <p class="health-note">Horário de Brasília. Cada horário roda uma vez por dia; se o bot estiver ocupado, ele roda assim que puder (até 90 min depois). Até 12 horários.</p>
+</section>
+
+<section class="health-grid">
+  <div class="panel">
+    <small>MODO DOS HORÁRIOS</small>
+    <h2>{{ agenda|selectattr('ativo')|list|length }} horário{{ '' if (agenda|selectattr('ativo')|list|length) == 1 else 's' }} ativo{{ '' if (agenda|selectattr('ativo')|list|length) == 1 else 's' }}</h2>
+    <label>Nesses horários o bot
+      <select id="rk-mode">
+        <option value="teste" {{ 'selected' if mode == 'teste' }}>só gera a prévia (modo teste)</option>
+        <option value="publicar" {{ 'selected' if mode == 'publicar' }}>publica no site</option>
+      </select>
+    </label>
+    <p class="health-note">O botão "Atualizar site agora" publica em qualquer modo. Se o Mercado Livre ou a Amazon pedirem verificação, ou alguma categoria vier vazia, nada é publicado e você recebe um aviso no Telegram.</p>
+  </div>
+  <div class="panel">
+    <small>ÚLTIMO RESULTADO</small>
+    <h2>{{ (rk.contagem or {}).values()|sum }} produtos</h2>
+    <dl class="health-list">
+      <div><dt>Novos</dt><dd>{{ (rk.novos or [])|length }}</dd></div>
+      <div><dt>Saíram</dt><dd>{{ (rk.removidos or [])|length }}</dd></div>
+      <div><dt>Preços do ML que mudaram</dt><dd>{{ rk.n_precos or 0 }}</dd></div>
+      <div><dt>Sem link (ficaram de fora)</dt><dd class="{{ 'bad' if rk.sem_link }}">{{ (rk.sem_link or [])|length }}</dd></div>
+      <div><dt>Achadinhos do app no arquivo</dt><dd>{{ rk.itens_app if rk.itens_app is not none else '—' }}</dd></div>
+    </dl>
+  </div>
+  <div class="panel">
+    <small>ACHADINHOS DO APP</small>
+    <h2>{{ 'Publicados' if export.status == 'ok' else (export.status or 'Sem informação') }}</h2>
+    <dl class="health-list">
+      <div><dt>Do app</dt><dd>{{ export.app_items if export.app_items is not none else '—' }}</dd></div>
+      <div><dt>Total no arquivo</dt><dd>{{ export.total if export.total is not none else '—' }}</dd></div>
+    </dl>
+    <p class="health-note"><a href="{{ site_url }}" target="_blank" rel="noopener">Abrir o site ↗</a></p>
+  </div>
+</section>
+
+{% if rk.contagem %}
+<section class="panel store-panel">
+  <small>PRODUTOS POR CATEGORIA</small>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Categoria</th><th>Mercado Livre</th><th>Amazon</th></tr></thead>
+    <tbody>{% for c in cats %}{% set a = (rk.antes or {}) %}<tr>
+      <td><strong>{{ lbl[c] }}</strong></td>
+      {% for loja in ['ml','az'] %}{% set k = loja ~ ':' ~ c %}<td>{{ rk.contagem.get(k, 0) }}{% if a.get(k, 0) != rk.contagem.get(k, 0) %} <span class="pill">antes {{ a.get(k, 0) }}</span>{% endif %}</td>{% endfor %}
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+<section class="history-grid">
+  <div class="panel"><small>ENTRARAM</small><div class="observations">{% for x in rk.novos or [] %}<p>{{ x }}</p>{% else %}<p class="empty">Nenhum produto novo.</p>{% endfor %}</div></div>
+  <div class="panel"><small>SAÍRAM</small><div class="observations">{% for x in rk.removidos or [] %}<p>{{ x }}</p>{% else %}<p class="empty">Nenhum produto saiu.</p>{% endfor %}</div></div>
+  <div class="panel"><small>ACHADINHOS MANUAIS (PREÇO DE HOJE)</small><div class="observations">{% for x in rk.achadinhos or [] %}<p>{{ x }}</p>{% else %}<p class="empty">Sem achadinhos manuais do Mercado Livre.</p>{% endfor %}</div></div>
+  <div class="panel"><small>PREÇOS QUE MUDARAM</small><div class="observations">{% for x in rk.precos or [] %}<p>{{ x }}</p>{% else %}<p class="empty">Nenhuma mudança de preço.</p>{% endfor %}</div></div>
+</section>
+{% endif %}
+<style>.ag-row{display:grid;grid-template-columns:140px 1fr auto auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}.ag-row:first-child{border-top:0}.ag-row input[type=time],.ag-row select{margin:0}.ag-row .check{gap:6px;font-size:13px;white-space:nowrap}.ag-row .icon-btn{width:36px;height:36px}.ag-row.off{opacity:.5}.rk-agenda{margin-bottom:20px}#ag-list{margin-top:12px}@media(max-width:600px){.ag-row{grid-template-columns:minmax(0,1fr) auto auto;gap:8px 10px;padding:12px 0}.ag-row input[type=time]{min-width:0;width:100%}.ag-row select{grid-column:1/-1;grid-row:2;width:100%}.site-actions{width:100%}.site-actions>*{flex:1 1 100%}.rk-quick{width:100%}.rk-quick .button{flex:1 1 auto}.rk-quick select{flex:1 1 100%;width:100%}.rk-chip span{padding:7px 12px}}.rk-scope{margin-bottom:20px}.rk-scope-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.rk-quick{display:flex;gap:8px}.rk-quick .button{padding:8px 12px;font-size:13px}.rk-quick select{margin:0;width:auto;padding:8px 12px;font-size:13px}.rk-quick{flex-wrap:wrap}.rk-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.rk-chip{display:inline-flex;margin:0;cursor:pointer}.rk-chip input{position:absolute;opacity:0;width:1px;height:1px}.rk-chip span{border:1px solid var(--line);border-radius:99px;padding:8px 14px;font-size:13px;color:var(--muted);transition:all .15s}.rk-chip input:checked+span{background:#2b2617;border-color:#d4af37;color:#f6d55c}.rk-chip input:focus-visible+span{outline:2px solid var(--accent)}.health-note a{color:var(--accent)}.rk-progress{margin-bottom:20px}.rk-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.rk-foot .button{padding:8px 14px;font-size:13px}.rk-row{display:flex;align-items:center;gap:12px}.rk-row b{margin-left:auto;color:var(--accent);font-size:20px}.rk-spin{width:20px;height:20px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex:none}.rk-bar{height:10px;background:#292e37;border-radius:10px;overflow:hidden;margin-top:14px}.rk-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#b68d16,#f6d55c);border-radius:10px;transition:width .6s ease}.rk-bar.queue i{width:35%!important;animation:rkq 1.4s ease-in-out infinite}@keyframes rkq{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}.site-actions{display:flex;gap:10px;flex-wrap:wrap}.observations p{margin:0;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px}</style>
+{% endblock %}
+{% block scripts %}<script>
+(()=>{const out=document.getElementById('rk-result'),box=document.getElementById('rk-progress'),fill=document.getElementById('rk-fill'),bar=fill.parentNode,
+ step=document.getElementById('rk-step'),pctEl=document.getElementById('rk-pct'),tEl=document.getElementById('rk-time'),btns=document.querySelectorAll('#rk-preview,#rk-publish,#rk-approve');
+let job=null,timer=null;
+const lblC={{ nomes|tojson }};
+const qs=n=>[...document.querySelectorAll('.rk-scope input[name="'+n+'"]')];
+function escopo(){return {cats:qs('cat').filter(i=>i.checked).map(i=>i.value),lojas:qs('loja').filter(i=>i.checked).map(i=>i.value),achadinhos:qs('ach')[0].checked}}
+function scopeTxt(){const e=escopo(),all=e.cats.length===qs('cat').length&&e.lojas.length===2;let p=[];
+ if(e.cats.length&&e.lojas.length)p.push((e.cats.length===qs('cat').length?'Todas as categorias':e.cats.map(c=>lblC[c]).join(', '))+(e.lojas.length===1?' (só '+(e.lojas[0]==='amazon'?'Amazon':'Mercado Livre')+')':''));
+ if(e.achadinhos)p.push('achadinhos');const t=all&&e.achadinhos?'Tudo':(p.length?(e.cats.length&&e.lojas.length?'':'Só ')+p.join(' + '):'Nada selecionado');
+ document.getElementById('rk-scope-txt').textContent=t;return t}
+document.querySelectorAll('.rk-scope input').forEach(i=>i.onchange=()=>{
+ // marcou uma categoria sem loja: vale para as duas lojas; marcou uma loja sem categoria: vale para todas
+ if(i.checked&&i.name==='cat'&&!qs('loja').some(x=>x.checked))qs('loja').forEach(x=>x.checked=true);
+ if(i.checked&&i.name==='loja'&&!qs('cat').some(x=>x.checked))qs('cat').forEach(x=>x.checked=true);
+ scopeTxt()});
+const only=document.getElementById('rk-only');only.onchange=()=>{if(!only.value)return;qs('cat').forEach(i=>i.checked=i.value===only.value);qs('loja').forEach(i=>i.checked=true);qs('ach')[0].checked=false;scopeTxt();only.value=''};
+document.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>{const t=b.dataset.quick==='tudo';qs('cat').forEach(i=>i.checked=t);qs('loja').forEach(i=>i.checked=t);qs('ach')[0].checked=true;scopeTxt()});
+scopeTxt();
+const mmss=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+' min '+String(s%60).padStart(2,'0')+' s'};
+function show(text,pct,queue){box.hidden=false;btns.forEach(b=>b.disabled=true);step.textContent=text;bar.classList.toggle('queue',!!queue);pctEl.textContent=queue?'':pct+'%';if(!queue)fill.style.width=pct+'%'}
+async function tick(){
+ try{
+  if(job){const j=await (await fetch('/api/jobs/'+job)).json();
+   if(j.status==='pending'){show('Na fila: começa assim que o bot terminar o que está fazendo agora',0,true);tEl.textContent='';return}
+   if(j.status==='done'||j.status==='error'){const s=((await (await fetch('/api/site/ranking/status')).json()).state)||{};finish(j.error||(s.status==='cancelado'||s.status==='erro'?s.erro:null));return}}
+  const {state,updated_at}=await (await fetch('/api/site/ranking/status')).json();
+  if(state.status!=='running'){if(!job)return finish(state.status==='erro'?state.erro:null);return}
+  const pct=Math.min(99,state.pct||1),ini=new Date(state.inicio),gasto=(Date.now()-ini)/1000;
+  show(state.etapa||'Atualizando…',pct,false);cancelBtn.hidden=pct>=95;
+  let falta=state.estimativa?state.estimativa-gasto:(pct>5?gasto*(100-pct)/pct:null);
+  tEl.textContent='Rodando há '+mmss(gasto)+(falta!=null&&falta>0?' · faltam cerca de '+mmss(falta):(falta!=null?' · quase lá':''));
+  const parado=(Date.now()-new Date(updated_at.replace(' ','T')+'Z'))/60000;
+  if(parado>20)tEl.textContent+=' · sem avanço há '+Math.round(parado)+' min (o bot pode ter sido reiniciado)';
+ }catch(e){}}
+function finish(err){clearInterval(timer);cancelBtn.hidden=true;fill.style.width='100%';pctEl.textContent='100%';box.querySelector('.rk-spin').style.display='none';
+ out.innerHTML=err?'<div class="flash error">'+err+'</div>':'<div class="flash">Pronto!</div>';setTimeout(()=>location.reload(),1800)}
+function poll(){tick();timer=setInterval(tick,3000)}
+const cancelBtn=document.getElementById('rk-cancel');
+cancelBtn.onclick=async()=>{if(!confirm('Cancelar a execução? Nada será publicado e o site fica como está.'))return;
+ cancelBtn.disabled=true;cancelBtn.textContent='Cancelando…';
+ const r=await fetch('/api/site/ranking/cancel',{method:'POST'});const d=await r.json();
+ if(!r.ok){cancelBtn.disabled=false;cancelBtn.textContent='Cancelar';out.innerHTML='<div class="flash error">'+(d.error||'Não foi possível cancelar')+'</div>'}
+ else step.textContent='Cancelando… (para no próximo passo)'};
+async function start(publish){const t=scopeTxt();if(t==='Nada selecionado'){out.innerHTML='<div class="flash error">Marque o que quer atualizar.</div>';return}
+ if(publish&&!confirm('Atualizar e publicar no site agora: '+t+'?'))return;
+ show('Enviando pedido ao bot…',0,true);
+ const r=await fetch('/api/site/ranking',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({publish,escopo:escopo()})});const d=await r.json();
+ if(!r.ok){box.hidden=true;btns.forEach(b=>b.disabled=false);out.innerHTML='<div class="flash error">'+(d.error||'Erro')+'</div>';return}
+ job=d.job_id;poll()}
+document.getElementById('rk-preview').onclick=()=>start(false);
+const ap=document.getElementById('rk-approve');if(ap)ap.onclick=async()=>{if(!confirm('Publicar no site exatamente esta prévia?'))return;show('Publicando a prévia…',0,true);
+ const r=await fetch('/api/site/ranking',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({preview:true})});job=(await r.json()).job_id;poll()};
+document.getElementById('rk-publish').onclick=()=>start(true);
+document.getElementById('rk-mode').onchange=async e=>{const r=await fetch('/api/site/ranking/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:e.target.value})});out.innerHTML=r.ok?'<div class="flash">Modo salvo.</div>':'<div class="flash error">Não foi possível salvar.</div>'};
+// agenda
+const OQUE={{ oque.items()|list|tojson }};let AG={{ agenda|tojson }};
+const agList=document.getElementById('ag-list');
+function agRender(){agList.innerHTML=AG.length?'':'<p class="empty">Nenhum horário. O site só atualiza pelos botões.</p>';
+ AG.forEach((it,k)=>{const r=document.createElement('div');r.className='ag-row'+(it.ativo?'':' off');
+  r.innerHTML='<input type="time" value="'+it.hora+'" aria-label="Horário">'+
+   '<select aria-label="O que atualizar">'+OQUE.map(([v,t])=>'<option value="'+v+'"'+(v===it.oque?' selected':'')+'>'+t+'</option>').join('')+'</select>'+
+   '<label class="check"><input type="checkbox"'+(it.ativo?' checked':'')+'> Ativo</label>'+
+   '<button type="button" class="icon-btn danger" aria-label="Remover horário">✕</button>';
+  const [t,sel]=[r.querySelector('input[type=time]'),r.querySelector('select')],cb=r.querySelector('input[type=checkbox]');
+  t.onchange=()=>it.hora=t.value;sel.onchange=()=>it.oque=sel.value;cb.onchange=()=>{it.ativo=cb.checked;r.classList.toggle('off',!cb.checked)};
+  r.querySelector('button').onclick=()=>{AG.splice(k,1);agRender()};agList.appendChild(r)})}
+document.getElementById('ag-add').onclick=()=>{if(AG.length>=12){out.innerHTML='<div class="flash error">No máximo 12 horários.</div>';return}AG.push({hora:'12:00',oque:'achadinhos',ativo:true});agRender()};
+document.getElementById('ag-save').onclick=async()=>{const r=await fetch('/api/site/ranking/agenda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({itens:AG})});const d=await r.json();
+ if(!r.ok){out.innerHTML='<div class="flash error">'+d.error+'</div>';return}AG=d.itens;agRender();out.innerHTML='<div class="flash">Agenda salva: '+(AG.filter(x=>x.ativo).map(x=>x.hora).join(', ')||'nenhum horário ativo')+'.</div>'};
+agRender();
+{% if rk.status == 'running' %}poll();{% endif %}
+})();
+</script>{% endblock %}

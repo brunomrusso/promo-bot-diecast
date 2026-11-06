@@ -47,6 +47,14 @@ ML_PROXY_URL = os.getenv("ML_PROXY_URL", "")  # http://user:pass@host:port
 
 CHECK_INTERVAL_MINUTES = _env_int("CHECK_INTERVAL_MINUTES", 15)
 
+# Site russodiecast.com.br: achadinhos gerados pelas minis com "Mostrar no site".
+# Use uma conta de FTP do cPanel restrita à pasta do site (não a conta principal).
+SITE_URL = os.getenv("SITE_URL", "https://russodiecast.com.br").strip()
+SITE_FTP_HOST = os.getenv("SITE_FTP_HOST", "").strip()
+SITE_FTP_USER = os.getenv("SITE_FTP_USER", "").strip()
+SITE_FTP_PASSWORD = os.getenv("SITE_FTP_PASSWORD", "").strip()
+SITE_FTP_DIR = os.getenv("SITE_FTP_DIR", "").strip()  # vazio = raiz da conta FTP
+
 
 def ml_playwright_proxy():
     """Dict de proxy para Playwright a partir de ML_PROXY_URL, ou None."""

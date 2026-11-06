@@ -3,6 +3,7 @@
 {% block heading %}Minis monitoradas{% endblock %}
 {% macro money(value) %}R$ {{ ('%.2f'|format(value)).replace('.', ',') }}{% endmacro %}
 {% block content %}
+{% set site_labels = {'hot-wheels': 'Hot Wheels', 'mini-gt': 'Mini GT', 'pixar-cars': 'Disney Pixar Cars', 'lego': 'LEGO', 'funko': 'Funko', 'blokees': 'Blokees', 'pokemon-tcg': 'Pokémon TCG'} %}
 <section class="split">
   <form class="panel form-grid monitored-create {{ 'create-open' if request.args.get('name') or request.args.get('observed_price') }}" method="post">
     <button type="button" class="button wide monitored-create-toggle" aria-expanded="{{ 'true' if request.args.get('name') or request.args.get('observed_price') else 'false' }}" aria-controls="monitored-create-fields" onclick="const form=this.closest('form'),open=form.classList.toggle('create-open');this.setAttribute('aria-expanded',String(open))"><span>Cadastrar mini</span><span class="create-chevron" aria-hidden="true">⌄</span></button>
@@ -12,12 +13,25 @@
       <label class="wide">Nome para identificação<input name="name" value="{{ request.args.get('name', '') }}" placeholder="Mini GT Nissan Skyline R34" required></label>
       <label class="wide">Termo usado na busca (use ; para buscas alternativas)<input name="search_terms" value="{{ request.args.get('search_terms', '') }}" placeholder="mini gt skyline r34; nissan skyline r34 mini gt" required></label>
       <label class="wide">Termos obrigatórios, separados por vírgula<input name="required_terms" value="{{ request.args.get('required_terms', '') }}" placeholder="mini gt, skyline, r34" required></label>
+      <label class="wide">Termos proibidos, separados por vírgula (opcional)<input name="forbidden_terms" value="{{ request.args.get('forbidden_terms', '') }}" placeholder="vermelho, htc66, monster"><small>Anúncio com qualquer um destes termos é recusado, mesmo tendo os obrigatórios.</small></label>
       <label class="wide">Tags<input name="tags" class="mini-tags-input" autocomplete="off" placeholder="Ex.: boulevard, japoneses, favoritos"><small>Clique nas sugestões ou digite uma nova tag e pressione Enter.</small></label>
       <label>Preço-alvo opcional (R$)<input name="max_price" value="{{ request.args.get('max_price', '') }}" type="number" min="0" step="0.01" placeholder="Sem alvo: aprender em silêncio"></label>
       <label class="check"><input name="active" type="checkbox" checked> Ativo</label>
+      <input type="hidden" name="site_form" value="1">
+      <label class="check"><input name="site_enabled" type="checkbox"> Mostrar no site como achadinho</label>
+      <label>Categoria no site<select name="site_category"><option value="">—</option>{% for c in site_categories %}<option value="{{ c }}">{{ site_labels[c] }}</option>{% endfor %}</select><small>O site mostra a melhor oferta do ML ou Amazon enquanto estiver até o preço-alvo.</small></label>
       <button class="primary wide" type="submit">Salvar monitoramento</button>
     </div>
   </form>
+  <div class="panel site-export">
+    <div><small>SITE RUSSODIECAST.COM.BR</small><h2>Achadinhos no site</h2>
+    {% set st = site_state.value if site_state else None %}
+    {% if not st %}<p>Ainda não enviado. O bot envia ao fim de cada ciclo.</p>
+    {% elif st.status == 'ok' %}<p>Último envio: {{ st.app_items }} achadinho(s) do app, {{ st.total }} no total{% if not st.changed %} (sem mudanças){% endif %}.</p>{% if st.skipped %}<details><summary>{{ st.skipped|length }} mini(s) fora do site</summary><ul>{% for name, why in st.skipped %}<li>{{ name }}: {{ why }}</li>{% endfor %}</ul></details>{% endif %}
+    {% elif st.status == 'disabled' %}<p>Envio desativado: configure o FTP do site no .env.</p>
+    {% else %}<p>Falha no último envio: {{ st.detail }}</p>{% endif %}</div>
+    <form method="post" action="{{ url_for('api_site_publish') }}"><button class="button">Enviar ao site agora</button></form>
+  </div>
   <section class="panel monitored-list">
     <small>MINIS MONITORADAS</small><h2>{{ items|length }} {{ 'mini' if items|length == 1 else 'minis' }}{% if active_filter == 'all' %} {{ 'cadastrada' if items|length == 1 else 'cadastradas' }}{% endif %}</h2>
     <form method="get" class="mini-tag-filter"><input type="hidden" name="f" value="{{ active_filter }}"><label for="mini-tag-filter">Buscar por tag<input id="mini-tag-filter" name="tag" list="mini-tag-options" value="{{ selected_tag }}" placeholder="Escolha ou digite uma tag" autocomplete="off"></label><datalist id="mini-tag-options">{% for tag in tags %}<option value="{{ tag }}">{% endfor %}</datalist><button class="button">Filtrar</button>{% if selected_tag %}<a class="button" href="{{ url_for('monitored', f=active_filter) }}">Limpar tag</a>{% endif %}</form>
@@ -60,15 +74,20 @@
           <a class="primary" href="{{ url_for('monitored_detail', item_id=item.id, scan=1) }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>Pesquisar</a>
           <a class="button" href="{{ url_for('monitored_detail', item_id=item.id) }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11a9 9 0 119 10M3 4v7h7M12 7v5l3 2"/></svg>Histórico</a>
         </div>
-        <details class="monitored-criteria"><summary>Critérios da busca</summary><p><b>Busca:</b> {{ item.search_terms }}</p><p><b>Exige:</b> {{ item.required_terms }}</p>{% if item.best_store %}<p><b>Menor preço coletado em 7 dias:</b> {{ item.best_store.store }} · {{ money(item.best_store.min_price) }}</p>{% endif %}</details>
+        {% if item.site_enabled %}<p class="site-badge"><small>No site · {{ site_labels.get(item.site_category, item.site_category) }}{% if not item.max_price %} · defina um preço-alvo para aparecer{% endif %}</small></p>{% endif %}
+        <details class="monitored-criteria"><summary>Critérios da busca</summary><p><b>Busca:</b> {{ item.search_terms }}</p><p><b>Exige:</b> {{ item.required_terms }}</p>{% if item.forbidden_terms %}<p><b>Recusa:</b> {{ item.forbidden_terms }}</p>{% endif %}{% if item.best_store %}<p><b>Menor preço coletado em 7 dias:</b> {{ item.best_store.store }} · {{ money(item.best_store.min_price) }}</p>{% endif %}</details>
         <form class="form-grid monitored-edit" id="edit-mini-{{ item.id }}" method="post" hidden>
           <input type="hidden" name="id" value="{{ item.id }}">
           <label class="wide">Nome<input name="name" value="{{ item.name }}" required></label>
           <label class="wide">Busca (use ; para alternativas)<input name="search_terms" value="{{ item.search_terms }}" required></label>
           <label class="wide">Termos obrigatórios<input name="required_terms" value="{{ item.required_terms }}" required></label>
+          <label class="wide">Termos proibidos (opcional)<input name="forbidden_terms" value="{{ item.forbidden_terms or '' }}" placeholder="vermelho, htc66"></label>
           <label class="wide">Tags<input name="tags" class="mini-tags-input" autocomplete="off" value="{{ item.tags|join(', ') }}" placeholder="Separe por vírgula"><small>Digite para escolher uma tag existente ou criar outra.</small></label>
           <label>Preço-alvo opcional<input name="max_price" type="number" min="0" step="0.01" value="{{ item.max_price if item.max_price else '' }}" placeholder="Sem alvo: aprender em silêncio"></label>
           <label class="check"><input name="active" type="checkbox" {{ 'checked' if item.active }}> Ativo</label>
+          <input type="hidden" name="site_form" value="1">
+          <label class="check"><input name="site_enabled" type="checkbox" {{ 'checked' if item.site_enabled }}> Mostrar no site como achadinho</label>
+          <label>Categoria no site<select name="site_category"><option value="">—</option>{% for c in site_categories %}<option value="{{ c }}" {{ 'selected' if item.site_category == c }}>{{ site_labels[c] }}</option>{% endfor %}</select></label>
           <button class="primary">Salvar</button><button type="button" class="button" data-cancel-mini>Cancelar</button>
         </form>
       </article>

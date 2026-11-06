@@ -2,8 +2,7 @@ import re
 import time
 from urllib.parse import quote
 
-from playwright.sync_api import sync_playwright
-
+from . import pw_shared
 from .ml_coupons import _args
 
 _ctx = None
@@ -16,7 +15,7 @@ def _get_context():
     da VM do que pelo proxy residencial usado pelo ML."""
     global _pw, _browser, _ctx
     if _ctx is None:
-        _pw = sync_playwright().start()
+        _pw = pw_shared.acquire("amazon")
         try:
             _browser = _pw.chromium.launch(
                 channel="chrome", headless=False, args=_args)
@@ -29,10 +28,12 @@ def _get_context():
 def close_context():
     global _pw, _browser, _ctx
     if _ctx:
-        _ctx.close()
-        _browser.close()
-        _pw.stop()
-        _ctx = _browser = _pw = None
+        try:
+            _ctx.close()
+            _browser.close()
+        finally:
+            _ctx = _browser = _pw = None
+            pw_shared.release("amazon")
 
 
 def _to_float(text: str):
@@ -73,9 +74,17 @@ def search_amazon(keyword: str, min_discount: int):
             loaded = True
         except Exception:
             blocked = _blocked(page)
+            try:
+                body = page.inner_text("body")[:6000].lower()
+            except Exception:
+                body = ""
             page.close()
             if blocked:
                 print(f"[Amazon] captcha em '{keyword}'")
+                return []
+            if "nenhum resultado" in body or "no results for" in body or "não encontramos" in body:
+                # busca muito específica sem resultados: não é timeout, não precisa repetir
+                print(f"[Amazon] sem resultados para '{keyword}'")
                 return []
             if attempt == 0:
                 print(f"[Amazon] timeout em '{keyword}', tentando de novo")

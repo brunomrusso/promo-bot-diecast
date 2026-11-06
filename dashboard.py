@@ -607,6 +607,75 @@ def api_monitored_scan(item_id):
         "scan_monitored", {"item_id": item_id})})
 
 
+@app.get("/site")
+@login_required
+def site_page():
+    from core import site_ranking
+    state = db.get_system_state()
+    rk = state.get(site_ranking.STATE_KEY, {})
+    cats = list(site_ranking.CATS)
+    return render_template("site.html", rk=rk.get("value") or {}, rk_at=rk.get("updated_at"),
+                           mode=site_ranking.mode(), agenda=site_ranking.get_agenda(), oque=site_ranking.OQUE, cats=cats, nomes=site_ranking.NOMES,
+                           labels=getattr(db, "SITE_LABELS", {}),
+                           export=(state.get("site_export") or {}).get("value") or {},
+                           site_url=config.SITE_URL)
+
+
+@app.post("/api/site/ranking")
+@login_required
+def api_site_ranking():
+    data = request.get_json(silent=True) or {}
+    if data.get("preview"):
+        return jsonify({"job_id": db.create_job("site_ranking_publish_preview", {})})
+    escopo = data.get("escopo")
+    if escopo is not None:
+        from core import site_ranking
+        try:
+            escopo = site_ranking.norm_escopo(escopo)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+    return jsonify({"job_id": db.create_job("site_ranking", {"publish": bool(data.get("publish")), "escopo": escopo})})
+
+
+@app.get("/api/site/ranking/status")
+@login_required
+def api_site_ranking_status():
+    from core import site_ranking
+    st = db.get_system_state().get(site_ranking.STATE_KEY) or {}
+    return jsonify({"state": st.get("value") or {}, "updated_at": st.get("updated_at")})
+
+
+@app.post("/api/site/ranking/cancel")
+@login_required
+def api_site_ranking_cancel():
+    from core import site_ranking
+    if not site_ranking.request_cancel():
+        return jsonify({"error": "Não há execução em andamento para cancelar."}), 409
+    return jsonify({"ok": True})
+
+
+@app.post("/api/site/ranking/agenda")
+@login_required
+def api_site_ranking_agenda():
+    from core import site_ranking
+    try:
+        agenda = site_ranking.save_agenda((request.get_json(silent=True) or {}).get("itens"))
+    except (ValueError, TypeError, AttributeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"itens": agenda})
+
+
+@app.post("/api/site/ranking/mode")
+@login_required
+def api_site_ranking_mode():
+    from core import site_ranking
+    mode = (request.get_json(silent=True) or {}).get("mode")
+    if mode not in ("teste", "publicar"):
+        return jsonify({"error": "Modo inválido"}), 400
+    db.set_setting(site_ranking.MODE_KEY, mode)
+    return jsonify({"mode": mode})
+
+
 @app.get("/api/jobs/<int:job_id>")
 @login_required
 def api_job(job_id):
@@ -628,11 +697,15 @@ def monitored():
                 "name": request.form.get("name", ""),
                 "search_terms": request.form.get("search_terms", ""),
                 "required_terms": request.form.get("required_terms", ""),
+                "forbidden_terms": request.form.get("forbidden_terms", ""),
                 "tags": request.form.get("tags", ""),
                 "max_price": request.form.get("max_price", ""),
                 "active": request.form.get("active") == "on",
                 "image": request.form.get("image", ""),
             }, item_id)
+            if request.form.get("site_form") == "1":
+                db.set_monitored_site(saved_id, request.form.get("site_enabled") == "on",
+                                      request.form.get("site_category", ""))
         except (ValueError, TypeError) as exc:
             flash(str(exc), "error")
             return redirect(url_for("monitored"))
@@ -669,7 +742,9 @@ def monitored():
         active_filter = "all"
     return render_template("monitored.html", items=items, counts=counts,
                            active_filter=active_filter, tags=tags, selected_tag=selected_tag,
-                           legacy_alerts=db.list_legacy_price_alerts())
+                           legacy_alerts=db.list_legacy_price_alerts(),
+                           site_categories=db.SITE_CATEGORIES,
+                           site_state=db.get_system_state().get("site_export"))
 
 
 @app.get("/monitored/<int:item_id>")
@@ -722,6 +797,20 @@ def api_monitored_target(item_id):
     if not updated:
         return jsonify({"error": "Mini não encontrada"}), 404
     return jsonify({"max_price": db.get_monitored_item(item_id)["max_price"]})
+
+
+@app.post("/api/site/publish")
+@login_required
+def api_site_publish():
+    from core import site_export
+    result = site_export.publish(force=True, generate_links=False)
+    if request.accept_mimetypes.best == "application/json" or request.is_json:
+        return jsonify(result), (200 if result.get("status") == "ok" else 400)
+    if result.get("status") == "ok":
+        flash(f"Site atualizado: {result['app_items']} achadinho(s) do app, {result['total']} no total.", "success")
+    else:
+        flash(f"Site não atualizado: {result.get('detail', '')}", "error")
+    return redirect(url_for("monitored"))
 
 
 @app.post("/monitored/<int:item_id>/toggle")

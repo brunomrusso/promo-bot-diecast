@@ -133,7 +133,14 @@ def monitored_match_diagnostic(deal: dict, item: dict) -> dict:
                 missing_words.append(w)
         if missing_words:
             missing.append(term if missing_words == words else f"{term} ({' '.join(missing_words)})")
+    forbidden_hit = []
+    for term in (item.get("forbidden_terms") or "").split(","):
+        words = [w for w in re.findall(r"[a-z0-9]+", normalize(term.strip())) if w not in stopwords]
+        if words and re.search(r"(?<![a-z0-9])" + r"[^a-z0-9]+".join(map(re.escape, words)) + r"(?![a-z0-9])", title):
+            forbidden_hit.append(term.strip())
     reasons = []
+    if forbidden_hit:
+        reasons.append("Contém termo proibido: " + ", ".join(forbidden_hit))
     if db.monitored_offer_excluded(item.get("id"), deal):
         reasons.append("Marcado como outra mini neste cadastro")
     if not required:
@@ -146,7 +153,7 @@ def monitored_match_diagnostic(deal: dict, item: dict) -> dict:
         reasons.append("Produto ou título na blacklist")
     if not deal.get("price"):
         reasons.append("Preço não extraído")
-    return {"matches": not reasons, "missing_terms": missing, "reasons": reasons}
+    return {"matches": not reasons, "missing_terms": missing, "forbidden_terms": forbidden_hit, "reasons": reasons}
 
 
 def search_queries(raw_terms: str) -> list:

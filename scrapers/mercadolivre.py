@@ -60,6 +60,10 @@ def _get_token(force_refresh=False):
     }, timeout=15)
     if resp.status_code != 200:
         print(f"[ML] refresh token falhou: {resp.status_code}")
+        if resp.status_code in (400, 401, 403):
+            # refresh token inválido/expirado: sem isso o bot achava que a API estava pronta
+            # e devolvia zero ofertas em silêncio, sem cair no Playwright.
+            db.set_system_state("ml_oauth", dict(tok, invalid=True, error=f"refresh {resp.status_code}"))
         return None
     _save_tokens(resp.json())
     return _tokens()["access_token"]
@@ -81,8 +85,9 @@ def _api(path, params=None, retry=True):
 
 
 def ml_api_ready():
-    """Token OAuth de usuário disponível (busca por API, sem browser)."""
-    return bool(_tokens().get("access_token"))
+    """Token OAuth de usuário disponível e válido (busca por API, sem browser)."""
+    tok = _tokens()
+    return bool(tok.get("access_token")) and not tok.get("invalid")
 
 
 def search_mercadolivre(keyword: str, min_discount: int):
@@ -92,6 +97,8 @@ def search_mercadolivre(keyword: str, min_discount: int):
         return []
     data = _api("/products/search", {"status": "active", "site_id": "MLB",
                                      "q": keyword, "limit": 10})
+    if data is None:
+        return None  # falha da API (token/permissão): o chamador decide o fallback
     if not data:
         return []
     deals = []

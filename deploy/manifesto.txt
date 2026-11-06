@@ -1,0 +1,11 @@
+# Atualização 2026-11-05j: botão Cancelar e "Só uma categoria" no painel; categoria Blokees; preço com data e hora no site; + (05/11g): painel Site com agenda editável de horários (cada um com "o que atualizar"), barra de progresso, "Publicar esta prévia", escolha do que atualizar, aviso no Telegram; Chrome do ML destravado; achadinho repetido vai uma vez só.
+# arquivo | md5 esperado HOJE no servidor (antes) | md5 novo (depois)
+dashboard.py|c17cda293192603898eb1ba56c417d70,ef20483068b86d993ce1526a733f0f2c,b80467ef35bbec2907ecc2fc5b259854,b8bf06a18dbe93267321e9268d4368f3|58f81e8629cc8942b788f2d7e3def1ef
+core/manual_jobs.py|f5a3e4f4e6aacb96966f881d0672eb03,e437e56cd94b73ed8f2b62dcff385086|e437e56cd94b73ed8f2b62dcff385086
+core/site_ranking.py|-|-
+templates/site.html|-|-
+test_site_ranking.py|-|-
+scrapers/ml_coupons.py|d3d2a9b3b80e7506f26bdbcb4cb68486,1f961d1fdfece47c719ffd9d22cf34c1|1f961d1fdfece47c719ffd9d22cf34c1
+core/site_export.py|39b21ece6726a8c77fa207e7c8862afc,1070c8dcd61ae8622a69284294a13b3c|9c7cb7460a7e206fbf27f15667615bea
+core/db.py|-|-
+templates/monitored.html|-|-

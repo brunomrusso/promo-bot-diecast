@@ -30,7 +30,8 @@ def _conn():
                      ("coupon_savings", "REAL"), ("affiliate_url", "TEXT"),
                      ("relevance_score", "INTEGER"), ("score_reasons", "TEXT"),
                      ("decided_at", "TIMESTAMP"), ("monitored_item_id", "INTEGER"),
-                     ("decision_source", "TEXT DEFAULT ''")]:
+                     ("decision_source", "TEXT DEFAULT ''"),
+                     ("admin_notified_at", "TIMESTAMP")]:
         if col not in cols:
             conn.execute(f"ALTER TABLE posted ADD COLUMN {col} {typ}")
     brand_rules_new = conn.execute(
@@ -72,7 +73,11 @@ def _conn():
                      ("all_time_min_at", "TIMESTAMP"),
                      ("last_seen_price", "REAL"),
                      ("last_seen_at", "TIMESTAMP"),
-                     ("image", "TEXT")]:
+                     ("image", "TEXT"),
+                     ("site_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                     ("site_category", "TEXT NOT NULL DEFAULT ''"),
+                     ("site_added_at", "TIMESTAMP"),
+                     ("forbidden_terms", "TEXT NOT NULL DEFAULT ''")]:
         if col not in monitored_cols:
             conn.execute(f"ALTER TABLE monitored_items ADD COLUMN {col} {typ}")
     conn.execute(
@@ -335,10 +340,31 @@ def record_publication_details(product_id, deal, affiliate_url):
 def expire_pending():
     hours = int(get_setting("approval_expiry_hours", 24))
     with _conn() as conn:
+        expiring = [r[0] for r in conn.execute(
+            "SELECT DISTINCT monitored_item_id FROM posted WHERE status='pending' "
+            "AND decision_source='catalog' AND monitored_item_id IS NOT NULL "
+            "AND posted_at < datetime('now', ?)", (f"-{hours} hours",))]
         conn.execute(
             "UPDATE posted SET status='expired' WHERE status='pending' "
             "AND posted_at < datetime('now', ?)", (f"-{hours} hours",))
+        # Expirar não é decisão humana: libera a mini para ser reapresentada no
+        # próximo ciclo, mesmo sem nova queda de 3% (antes ela sumia para sempre).
+        for item_id in expiring:
+            conn.execute("DELETE FROM catalog_opportunities WHERE monitored_item_id=?", (item_id,))
     return hours
+
+
+def mark_admin_notified(product_id):
+    with _conn() as conn:
+        conn.execute("UPDATE posted SET admin_notified_at=CURRENT_TIMESTAMP WHERE product_id=?", (product_id,))
+
+
+def pending_catalog_unnotified(limit=5):
+    expire_pending()
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM posted WHERE status='pending' AND decision_source='catalog' "
+            "AND admin_notified_at IS NULL ORDER BY posted_at LIMIT ?", (limit,))]
 
 
 def get_pending(product_id: str):
@@ -732,6 +758,11 @@ def deal_price_quality(title, price, monitored_item_id=None):
             required = [term.strip().lower()
                         for term in candidate["required_terms"].split(",")
                         if term.strip()]
+            forbidden = [term.strip().lower()
+                         for term in (candidate["forbidden_terms"] or "").split(",")
+                         if term.strip()]
+            if not monitored_item_id and any(term in title_lower for term in forbidden):
+                continue
             if monitored_item_id or (required and all(term in title_lower for term in required)):
                 matches.append((len(required), candidate))
         if not matches:
@@ -1034,6 +1065,11 @@ def monitored_tags():
         return sorted({tag for row in conn.execute("SELECT tags FROM monitored_items") for tag in json.loads(row["tags"])})
 
 
+def normalize_term_list(raw):
+    """"vermelho,  HTC66 ,," -> "vermelho, HTC66" (termos separados por vírgula)."""
+    return ", ".join(t.strip() for t in str(raw or "").split(",") if t.strip())
+
+
 def save_monitored_item(data, item_id=None):
     target = float(data.get("max_price") or 0)
     if not math.isfinite(target) or target < 0:
@@ -1062,12 +1098,16 @@ def save_monitored_item(data, item_id=None):
                     "max_price=?,active=? WHERE id=?", values + (item_id,))
             if "tags" in data:
                 conn.execute("UPDATE monitored_items SET tags=? WHERE id=?", (tags, item_id))
+            if "forbidden_terms" in data:
+                conn.execute("UPDATE monitored_items SET forbidden_terms=? WHERE id=?",
+                             (normalize_term_list(data.get("forbidden_terms")), item_id))
             return item_id
         row_id = conn.execute(
             "INSERT INTO monitored_items "
             "(name,search_terms,required_terms,max_price,active,image) VALUES (?,?,?,?,?,?)",
             values + (img,)).lastrowid
-        conn.execute("UPDATE monitored_items SET tags=? WHERE id=?", (tags, row_id))
+        conn.execute("UPDATE monitored_items SET tags=?,forbidden_terms=? WHERE id=?",
+                     (tags, normalize_term_list(data.get("forbidden_terms")), row_id))
         return row_id
 
 
@@ -1617,3 +1657,46 @@ def finish_job(job_id, result=None, error=None):
 
 
 _conn().close()
+
+
+SITE_CATEGORIES = ("hot-wheels", "mini-gt", "pixar-cars", "lego", "funko", "blokees", "pokemon-tcg")
+
+
+def set_monitored_site(item_id, enabled, category=""):
+    """Marca/desmarca a mini para aparecer como achadinho no site."""
+    category = (category or "").strip()
+    if enabled and category not in SITE_CATEGORIES:
+        raise ValueError("Escolha a categoria do site para mostrar a mini como achadinho.")
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE monitored_items SET site_enabled=?, site_category=?, "
+            "site_added_at=CASE WHEN ?=1 AND site_added_at IS NULL THEN CURRENT_TIMESTAMP "
+            "WHEN ?=0 THEN NULL ELSE site_added_at END WHERE id=?",
+            (int(bool(enabled)), category if enabled else "", int(bool(enabled)),
+             int(bool(enabled)), item_id))
+
+
+def site_monitored_items():
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM monitored_items WHERE site_enabled=1 AND active=1 ORDER BY id")]
+
+
+def site_best_offer(item_id, hours=36):
+    """Melhor oferta nacional recente (ML ou Amazon) de uma mini, para o site."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM valid_price_observations WHERE monitored_item_id=? "
+            "AND store IN ('Mercado Livre','Amazon') AND observed_at >= datetime('now', ?) "
+            "ORDER BY price ASC, observed_at DESC LIMIT 1",
+            (item_id, f"-{int(hours)} hours")).fetchone()
+        return dict(row) if row else None
+
+
+def site_daily_history(item_id, store, product_id, days=180):
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT date(observed_at, '-3 hours') data, MIN(price) preco FROM valid_price_observations "
+            "WHERE monitored_item_id=? AND store=? AND product_id=? AND observed_at >= datetime('now', ?) "
+            "GROUP BY date(observed_at, '-3 hours') ORDER BY data",
+            (item_id, store, product_id, f"-{int(days)} days"))]

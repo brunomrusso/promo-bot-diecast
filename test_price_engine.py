@@ -209,6 +209,24 @@ class PriceEngineTests(unittest.TestCase):
         self.assertFalse(filters.identifies_monitored(self.deal(title="Kaido House Civic EF KHMG1790"), item))
         self.assertFalse(filters.identifies_monitored(self.deal(title="Kaido House Civic Ref KHMG179"), item))
 
+    def test_forbidden_terms_block_wrong_version(self):
+        item_id = db.save_monitored_item(dict(name="84 Mustang SVO Power Trip", search_terms="mustang svo",
+                                              required_terms="84, mustang, svo", forbidden_terms=" vermelho,, HTC66 ",
+                                              max_price=60))
+        item = db.get_monitored_item(item_id)
+        self.assertEqual(item["forbidden_terms"], "vermelho, HTC66")
+        self.assertTrue(filters.identifies_monitored(self.deal(title="Hot Wheels '84 Mustang Svo - Prata"), item))
+        wrong = filters.monitored_match_diagnostic(self.deal(title="Hot Wheels - 84 Mustang SVO - HTC66"), item)
+        self.assertFalse(wrong["matches"])
+        self.assertEqual(wrong["forbidden_terms"], ["HTC66"])
+        self.assertFalse(filters.identifies_monitored(self.deal(title="Miniatura Hot Wheels 84' Mustang SVO Vermelho"), item))
+        self.assertTrue(filters.identifies_monitored(self.deal(title="Hot Wheels 84 Mustang SVO Avermelhado"), item))
+        item["active"] = False
+        db.save_monitored_item(item, item_id)
+        self.assertEqual(db.get_monitored_item(item_id)["forbidden_terms"], "vermelho, HTC66")
+        db.save_monitored_item(dict(item, forbidden_terms=""), item_id)
+        self.assertEqual(db.get_monitored_item(item_id)["forbidden_terms"], "")
+
     def test_neutral_transition_preserves_prices_and_manual_pending(self):
         for pid in ("old", "manual-user"):
             deal = self.deal(pid)

@@ -917,5 +917,15 @@ def process_jobs(urgent_only=False):
                 })
             elif row["action"] == "publish":
                 db.finish_job(row["id"], publish_deal(payload["deal"]))
+            elif row["action"] == "site_ranking_publish_preview":
+                from core import site_ranking
+                db.finish_job(row["id"], site_ranking.publish_preview())
+            elif row["action"] == "site_ranking":
+                from core import site_ranking
+                result = site_ranking.run(publish=bool(payload.get("publish")), origem="painel",
+                                          escopo=payload.get("escopo"))
+                if result.get("status") == "erro":
+                    raise RuntimeError(result.get("erro"))
+                db.finish_job(row["id"], result)
         except Exception as exc:
             db.finish_job(row["id"], error=str(exc))

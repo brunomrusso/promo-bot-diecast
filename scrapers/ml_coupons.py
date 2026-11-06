@@ -1,11 +1,13 @@
+import os
 import re
+import socket
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import config
 from core import db
-from playwright.sync_api import sync_playwright
+from . import pw_shared
 
 PROFILE_DIR = Path(__file__).parent.parent / "chrome_profile_ml"
 CUPONS_URL = "https://www.mercadolivre.com.br/cupons"
@@ -74,12 +76,32 @@ def is_ml_verification(page):
         return False
 
 
+def _clear_stale_profile_lock():
+    """O perfil veio copiado de outra máquina (migração) ou o Chrome caiu: o SingletonLock antigo
+    faz o Chrome travar esperando ("perfil em uso em outro computador"). Remove só se o dono não existe."""
+    lock = PROFILE_DIR / "SingletonLock"
+    try:
+        target = os.readlink(lock)
+    except OSError:
+        return
+    host, _, pid = target.rpartition("-")
+    if host == socket.gethostname() and pid.isdigit() and os.path.exists(f"/proc/{pid}"):
+        return
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+        try:
+            (PROFILE_DIR / name).unlink()
+        except FileNotFoundError:
+            pass
+    print(f"[ML] trava antiga do perfil removida ({target})")
+
+
 def _get_context():
     """Contexto persistente: cookies/sessão do ML ficam salvos em disco."""
     global _ctx, _pw
     if _ctx is None:
-        _pw = sync_playwright().start()
+        _pw = pw_shared.acquire("ml")
         PROFILE_DIR.mkdir(exist_ok=True)
+        _clear_stale_profile_lock()
         proxy = config.ml_playwright_proxy()
         if proxy:
             print(f"[ML] usando proxy {proxy['server']}")
@@ -99,9 +121,11 @@ def _get_context():
 def close_context():
     global _ctx, _pw
     if _ctx:
-        _ctx.close()
-        _pw.stop()
-        _ctx = _pw = None
+        try:
+            _ctx.close()
+        finally:
+            _ctx = _pw = None
+            pw_shared.release("ml")
 
 
 def _is_login_page(page) -> bool:

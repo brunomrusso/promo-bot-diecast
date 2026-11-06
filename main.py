@@ -6,7 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import config
-from core import approvals, db, filters, manual_jobs
+from core import approvals, db, filters, manual_jobs, site_export, site_ranking
 from core.affiliate import to_affiliate_url
 from core.notifier import send_for_approval
 from scrapers import close_browser, get_scrapers
@@ -109,13 +109,38 @@ def _check_deals():
         new_opportunities += 1
         link = to_affiliate_url(deal)
         if config.TELEGRAM_ADMIN_CHAT_ID and not _is_quiet():
-            send_for_approval(deal, link)
+            if send_for_approval(deal, link):
+                db.mark_admin_notified(deal["id"])
             time.sleep(2)  # respeita rate limit do Telegram
         print(f"[catálogo] oportunidade para revisão: {item['name'][:60]} — R$ {deal['price']:.2f}")
+    _notify_pending_after_quiet()
     manual_jobs.process_jobs()
     db.set_system_state("catalog", {"active": len(monitored), "new_opportunities": new_opportunities,
                                      "archived": archived, "queue_limit": 20, "cycle_limit": 5})
+    site = site_export.publish()
+    if site.get("status") == "error":
+        print(f"[!] site: {site.get('detail')}")
+    elif site.get("changed"):
+        print(f"[*] site: achadinhos.json enviado ({site['app_items']} do app, {site['total']} no total)")
     print("[*] ciclo do catálogo concluído")
+
+
+def _notify_pending_after_quiet():
+    """Oportunidades criadas no horário silencioso ficavam só no painel e expiravam
+    sem você ver. Fora do silêncio, avisa no Telegram as que ainda não foram avisadas."""
+    if not config.TELEGRAM_ADMIN_CHAT_ID or _is_quiet():
+        return
+    for row in db.pending_catalog_unnotified():
+        deal = {"id": row["product_id"], "store": row["store"], "title": row["title"],
+                "price": row["price"], "original_price": row.get("original_price") or row["price"],
+                "discount": row.get("discount") or 0, "url": row.get("url") or "",
+                "image": row.get("image") or ""}
+        try:
+            if send_for_approval(deal, to_affiliate_url(deal)):
+                db.mark_admin_notified(row["product_id"])
+        except Exception as exc:
+            print(f"[!] aviso pendente falhou: {exc}")
+        time.sleep(2)
 
 
 def check_deals():
@@ -162,6 +187,10 @@ def main():
                 if time.time() - last_heartbeat >= 30:
                     db.set_system_state("heartbeat", {"phase": "idle"})
                     last_heartbeat = time.time()
+                    try:
+                        site_ranking.maybe_run()   # ranking do site: 06:40 e 18:40 (Brasília)
+                    except Exception as exc:
+                        print(f"[!] ranking do site: {exc}")
                 time.sleep(3)
             check_deals()
     except KeyboardInterrupt:
