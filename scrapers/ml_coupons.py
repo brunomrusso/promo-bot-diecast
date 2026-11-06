@@ -95,6 +95,20 @@ def _clear_stale_profile_lock():
     print(f"[ML] trava antiga do perfil removida ({target})")
 
 
+# Economia de proxy: o bot só precisa do texto/dados da página. Imagens, vídeos, fontes e rastreadores
+# não passam pelo proxy (que é cobrado por GB). O login manual (ml-login.sh) desliga isso: ML_ECONOMIA=0.
+_BLOQ_TIPOS = {"image", "media", "font"}
+_BLOQ_DOMINIOS = ("google-analytics.com", "googletagmanager.com", "doubleclick.net", "facebook.net",
+                  "facebook.com/tr", "hotjar", "clarity.ms", "googlesyndication.com")
+
+
+def _economia(route):
+    req = route.request
+    if req.resource_type in _BLOQ_TIPOS or any(d in req.url for d in _BLOQ_DOMINIOS):
+        return route.abort()
+    return route.continue_()
+
+
 def _get_context():
     """Contexto persistente: cookies/sessão do ML ficam salvos em disco."""
     global _ctx, _pw
@@ -115,6 +129,9 @@ def _get_context():
                 str(PROFILE_DIR), headless=False, args=_args,
                 locale="pt-BR", proxy=proxy,
             )
+        if proxy and os.getenv("ML_ECONOMIA", "1") != "0":
+            _ctx.route("**/*", _economia)
+            print("[ML] economia de proxy ligada (sem imagens, vídeos, fontes e rastreadores)")
     return _ctx
 
 

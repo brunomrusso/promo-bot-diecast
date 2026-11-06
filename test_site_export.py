@@ -8,6 +8,18 @@ from unittest.mock import patch
 from core import db, site_export
 
 
+
+# Os testes não podem depender das etiquetas/IDs por canal configurados no .env do servidor.
+_canais = patch.multiple("config", ML_TAG_BOT="", ML_TAG_SITE="")
+
+
+def setUpModule():
+    _canais.start()
+
+
+def tearDownModule():
+    _canais.stop()
+
 class SiteExportTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

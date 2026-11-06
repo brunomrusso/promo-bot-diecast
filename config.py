@@ -65,7 +65,10 @@ def ml_playwright_proxy():
         return None
     from urllib.parse import urlparse
     parsed = urlparse(ML_PROXY_URL)
-    proxy = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+    # Arquivos estáticos (CDN mlstatic: JS, CSS, imagens) vão direto pela VPS: o CDN não bloqueia
+    # e é a maior parte dos bytes. Só as páginas do Mercado Livre passam pelo proxy (cobrado por GB).
+    proxy = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}",
+             "bypass": os.getenv("ML_PROXY_BYPASS", "*.mlstatic.com,mlstatic.com")}
     if parsed.username:
         proxy["username"] = parsed.username
         proxy["password"] = parsed.password or ""

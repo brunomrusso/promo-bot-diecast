@@ -13,6 +13,18 @@ EXPENSIVE = "Hot Wheels Premium Fast And Furious Honda Civic Coupé Ej1 93 Cor P
 CHEAP = "Hot Wheels 1993 Honda Civic Coupe Velozes E Furiosos Jbl90 Preto"
 
 
+
+# Os testes não podem depender das etiquetas/IDs por canal configurados no .env do servidor.
+_canais = patch.multiple("config", ML_TAG_BOT="", ML_TAG_SITE="")
+
+
+def setUpModule():
+    _canais.start()
+
+
+def tearDownModule():
+    _canais.stop()
+
 class PriceEngineTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

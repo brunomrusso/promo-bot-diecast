@@ -39,7 +39,7 @@ pgrep -f "Xvfb :99" >/dev/null || { Xvfb :99 -screen 0 1366x900x24 >/tmp/xvfb-ml
 pgrep -f "x11vnc.*:99" >/dev/null || { x11vnc -display :99 -nopw -listen localhost -forever -shared >/tmp/x11vnc-ml.log 2>&1 & }
 sleep 2
 
-DISPLAY=:99 $PY -c "
+ML_ECONOMIA=0 DISPLAY=:99 $PY -c "
 import time
 from scrapers.ml_coupons import _get_context
 c = _get_context()
@@ -60,7 +60,7 @@ trap - INT
 echo "Fechando o Chrome do login..."
 stop_browser
 echo "Validando a sessão no Gerador de Links..."
-DISPLAY=:99 $PY -c "
+ML_ECONOMIA=0 DISPLAY=:99 $PY -c "
 from scrapers.ml_coupons import _get_context, close_context, is_ml_verification, mark_ml_ready, mark_ml_verification, LINKBUILDER_URL
 c = _get_context()
 p = c.pages[0] if c.pages else c.new_page()

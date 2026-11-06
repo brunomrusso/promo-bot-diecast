@@ -38,6 +38,18 @@ ML_JSON_PAGE = ("<html><body><div class='layout-novo'></div><script id=\"__NORDI
     + ";_n.ctx.r.assets={}</script></body></html>")
 
 
+
+# Os testes não podem depender das etiquetas/IDs por canal configurados no .env do servidor.
+_canais = patch.multiple("config", ML_TAG_BOT="", ML_TAG_SITE="")
+
+
+def setUpModule():
+    _canais.start()
+
+
+def tearDownModule():
+    _canais.stop()
+
 class SiteRankingTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
