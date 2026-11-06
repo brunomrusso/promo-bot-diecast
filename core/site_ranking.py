@@ -347,7 +347,7 @@ def assemble(current, achadinhos, ml, az, hoje, new_ml_link):
             etq = (o or {}).get("etiqueta") if o else (config.ML_TAG_SITE or None)
             p = {"id": f"{c}-{rank:02d}", "loja": "mercadolivre", "id_ml": x["id"], "nome": nome,
                  "imagem": f"https://http2.mlstatic.com/D_NQ_NP_2X_{x['k']}-F.webp", "preco": x["preco"],
-                 "preco_consultado_em": hoje, "categoria": c, "posicao_ranking": rank, "link_afiliado": link}
+                 "preco_consultado_em": x.get("quando") or hoje, "categoria": c, "posicao_ranking": rank, "link_afiliado": link}
             if etq:
                 p["etiqueta"] = etq
             if c == "pixar-cars":
@@ -602,6 +602,126 @@ def collect_ml(cats=None):
     return pick_ml(raw)
 
 
+# ---------------- ranking do ML pela API oficial (sem navegador para os produtos de catálogo) ----------------
+# Categoria e código da marca no ranking de mais vendidos (conferidos na API em 06/11).
+ML_API_SOURCES = {
+    "mini-gt": ("MLB2097", "13033313"), "hot-wheels": ("MLB2097", "428690"), "pixar-cars": ("MLB2097", "1006861"),
+    "lego": ("MLB12443", "1249447"), "funko": ("MLB1839", "415856"), "blokees": ("MLB1839", "43345273"),
+    "pokemon-tcg": ("MLB6899", "12067163"),
+}
+_KEY = re.compile(r"\d+-ML[AB]U?\d+_\d+")
+
+
+def _ml_api_get(path, params=None):
+    """(status, json) da API oficial do ML com o token do bot. Não usa proxy nem navegador."""
+    import requests
+    from scrapers import mercadolivre as M
+    for tentativa in (0, 1):
+        tok = M._get_token(force_refresh=bool(tentativa))
+        if not tok:
+            return 0, None
+        r = requests.get(M.API + path, params=params, headers={"Authorization": f"Bearer {tok}"}, timeout=20)
+        if r.status_code == 401 and not tentativa:
+            continue
+        try:
+            return r.status_code, r.json()
+        except ValueError:
+            return r.status_code, None
+    return 0, None
+
+
+def api_ranking(c):
+    """[{id, position, type}] do ranking de mais vendidos da categoria/marca. Sem ranking da marca: PaginaIndisponivel."""
+    cat, marca = ML_API_SOURCES[c]
+    s, j = _ml_api_get(f"/highlights/MLB/category/{cat}", {"attribute": "BRAND", "attributeValue": marca} if marca else None)
+    if s == 404:
+        raise PaginaIndisponivel(f"o ML não tem ranking de {NOMES[c]} agora")
+    if s != 200 or not isinstance(j, dict):
+        raise RuntimeError(f"API de mais vendidos respondeu HTTP {s}")
+    return j.get("content") or []
+
+
+def api_produto(pid):
+    """Produto de catálogo pela API: {t, id, preco, k} ou None."""
+    s, p = _ml_api_get(f"/products/{pid}")
+    if s != 200 or not p:
+        return None
+    preco = (p.get("buy_box_winner") or {}).get("price")
+    if not preco:
+        s2, it = _ml_api_get(f"/products/{pid}/items")
+        precos = [i["price"] for i in (it or {}).get("results", []) if i.get("price") and i.get("condition") != "used"]
+        preco = min(precos) if precos else None
+    k = next((pic.get("id") for pic in p.get("pictures") or [] if _KEY.fullmatch(str(pic.get("id", "")))), None)
+    if not (preco and k and p.get("name")):
+        return None
+    return {"t": p["name"], "id": pid, "preco": round(float(preco), 2), "k": k}
+
+
+def collect_ml_api(cats, current, page_html=None, api_rank=None, api_prod=None):
+    """Ranking pela API. Catálogo (PRODUCT) sai completo da API. Anúncios MLBU (a API não dá preço/foto):
+    lidos de 1 página filtrada por categoria no navegador logado; se o navegador estiver barrado,
+    os MLBU que já estavam no site ficam com o preço anterior e os novos entram na próxima rodada."""
+    page_html = page_html or _ml_page_html
+    api_rank = api_rank or api_ranking
+    api_prod = api_prod or api_produto
+    from scrapers.ml_coupons import ml_available
+    navegador = [ml_available()]
+    atuais = {p.get("id_ml"): p for p in current.get("produtos", []) if p.get("loja", "mercadolivre") == "mercadolivre"}
+    raw = {}
+    fontes = [c for c in ML_API_SOURCES if not cats or c in cats]
+    for n, c in enumerate(fontes):
+        _progress(f"Mercado Livre (API): {NOMES[c]} ({n + 1} de {len(fontes)})", 2 + 42 * n / len(fontes))
+        try:
+            entradas = api_rank(c)
+        except PaginaIndisponivel as exc:
+            _pulados.add(c)
+            _avisos.append(f"ML {NOMES[c]}: {exc}; mantive os produtos anteriores")
+            continue
+        da_pagina, mantidos = {}, 0
+        if any(e.get("type") != "PRODUCT" for e in entradas) and navegador[0]:
+            cat, marca = ML_API_SOURCES[c]
+            try:
+                html = page_html(f"{ML}/mais-vendidos/{cat}" + (f"?attribute_id=BRAND&attribute_value_id={marca}" if marca else ""))
+                da_pagina = {i["id"]: i for i in ml_items_any(html, NOMES[c])}
+                _pause()
+            except Blocked as exc:
+                navegador[0] = False
+                _avisos.append(f"Navegador do ML barrado ({str(exc)[:80]}); anúncios fora do catálogo ficaram com o preço anterior")
+            except PaginaIndisponivel as exc:
+                _avisos.append(f"ML {NOMES[c]}: página não abriu ({exc})")
+        itens = []
+        for e in entradas:
+            pid, pos = str(e.get("id")), e.get("position")
+            if e.get("type") == "PRODUCT":
+                x = api_prod(pid) or da_pagina.get(pid)
+            else:
+                x = da_pagina.get(pid)
+                if not x and pid in atuais:  # sem a página: reaproveita o que o site já tinha
+                    o = atuais[pid]
+                    km = _KEY.search(o.get("imagem", ""))
+                    if km and o.get("preco"):
+                        x = {"t": o["nome"], "id": pid, "preco": o["preco"], "k": km.group(0),
+                             "quando": o.get("preco_consultado_em")}
+                        mantidos += 1
+            if x:
+                itens.append(dict(x, pos=pos))
+        if mantidos:
+            _avisos.append(f"ML {NOMES[c]}: {mantidos} anúncio(s) com o preço anterior (navegador indisponível)")
+        raw[c] = itens
+    return pick_ml(raw)
+
+
+def _collect_ml_auto(cats, current):
+    """API quando o token está ok; senão o caminho antigo (navegador)."""
+    from scrapers.mercadolivre import ml_api_ready
+    if ml_api_ready():
+        try:
+            return collect_ml_api(cats, current)
+        except RuntimeError as exc:
+            _avisos.append(f"API de mais vendidos falhou ({exc}); usei o navegador")
+    return collect_ml(cats)
+
+
 def ml_price(id_ml):
     """Preço atual do anúncio (meta itemprop=price); None se sumiu ou está sem estoque."""
     from scrapers.ml_coupons import _get_context, is_ml_error, is_ml_verification, mark_ml_verification
@@ -727,7 +847,7 @@ def run(publish=False, origem="painel", escopo=None):
         report = {"novos": [], "removidos": [], "precos": [], "sem_link": []}
         produtos = current
         if groups:
-            ml = collect_ml(esc["cats"]) if "mercadolivre" in esc["lojas"] else {}
+            ml = _collect_ml_auto(esc["cats"], current) if "mercadolivre" in esc["lojas"] else {}
             az = collect_az(esc["cats"]) if "amazon" in esc["lojas"] else {}
             groups -= {("mercadolivre", c) for c in _pulados}  # categorias puladas ficam como estavam
             n_links = [0]
@@ -745,6 +865,10 @@ def run(publish=False, origem="painel", escopo=None):
             check_safe(current, produtos)
         manual_ml = [i["id_ml"] for i in ach.get("itens", []) if i.get("origem") != "app" and i.get("loja") == "mercadolivre" and i.get("id_ml")] if esc["achadinhos"] else []
         prices = {}
+        from scrapers.ml_coupons import ml_available
+        if manual_ml and not ml_available():  # sessão do ML pausada: não abre o navegador só pelos achadinhos
+            _avisos.append("Achadinhos do ML não atualizados nesta rodada (sessão do ML pausada); ficaram como estavam")
+            manual_ml = []
         for k, id_ml in enumerate(manual_ml):
             _progress(f"Achadinhos: preço {k + 1} de {len(manual_ml)}", 86 + 8 * k / max(1, len(manual_ml)))
             try:

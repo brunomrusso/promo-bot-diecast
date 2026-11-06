@@ -141,6 +141,39 @@ class SiteRankingTests(unittest.TestCase):
         self.assertEqual(st["status"], "ok")
         self.assertTrue(any("Achadinhos do ML não atualizados" in a for a in st["plano_b"]))
 
+    def test_ranking_ml_pela_api(self):
+        entradas = {"hot-wheels": [{"id": "MLB35762220", "position": 1, "type": "PRODUCT"},
+                                   {"id": "MLBU1", "position": 2, "type": "USER_PRODUCT"},
+                                   {"id": "MLBU2", "position": 3, "type": "USER_PRODUCT"},
+                                   {"id": "MLBU9", "position": 4, "type": "USER_PRODUCT"}]}
+        def rank(c):
+            if c == "mini-gt":
+                raise sr.PaginaIndisponivel("o ML não tem ranking de Mini GT agora")
+            return entradas.get(c, [])
+        prod = lambda pid: {"t": "Conjunto 5 Carrinhos Hot Wheels", "id": pid, "preco": 72.99, "k": "724815-MLA99876815105_112025"}
+        pagina = ('<li class="ui-search-layout__item"><span>7º mais vendido</span><img src="https://http2.mlstatic.com/D_Q_NP_1-MLA2_1-O.webp">'
+                  '<a class="poly-component__title" href="https://www.mercadolivre.com.br/x/up/MLBU1">Hot Wheels Mustang</a>'
+                  '<div class="poly-price__current"><span class="andes-money-amount__fraction">21</span></div></li>')
+        current = {"produtos": [{"id": "hot-wheels-05", "loja": "mercadolivre", "id_ml": "MLBU2", "nome": "HW Antigo",
+                                 "preco": 30.0, "imagem": "https://http2.mlstatic.com/D_NQ_NP_2X_3-MLA4_1-F.webp",
+                                 "preco_consultado_em": "2026-11-05T10:00"}]}
+        with patch("scrapers.ml_coupons.ml_available", lambda: True), patch.object(sr, "_pause", lambda: None):
+            sr._avisos.clear(); sr._pulados.clear()
+            out = sr.collect_ml_api(["mini-gt", "hot-wheels"], current, page_html=lambda u: pagina, api_rank=rank, api_prod=prod)
+        hw = {x["id"]: x for x in out["hot-wheels"]}
+        self.assertEqual(sorted(hw), ["MLB35762220", "MLBU1", "MLBU2"])  # MLBU2: fora da página, mas já estava no site; MLBU9 (novo, sem dados) fica de fora
+        self.assertEqual((hw["MLBU1"]["pos"], hw["MLBU1"]["preco"]), (2, 21.0))  # posição da API, preço da página
+        self.assertEqual(sr._pulados, {"mini-gt"})
+        def barrado(u):
+            raise sr.Blocked("captcha")
+        with patch("scrapers.ml_coupons.ml_available", lambda: True), patch.object(sr, "_pause", lambda: None):
+            sr._avisos.clear()
+            out = sr.collect_ml_api(["hot-wheels"], current, page_html=barrado, api_rank=rank, api_prod=prod)
+        hw = {x["id"]: x for x in out["hot-wheels"]}
+        self.assertEqual(sorted(hw), ["MLB35762220", "MLBU2"])  # navegador barrado: MLBU2 mantido do site
+        self.assertEqual((hw["MLBU2"]["preco"], hw["MLBU2"]["quando"], hw["MLBU2"]["pos"]), (30.0, "2026-11-05T10:00", 3))
+        self.assertTrue(any("barrado" in a for a in sr._avisos))
+
     def test_marca_que_sumiu_nao_pausa_o_ml(self):
         pages = {sr.ML + "/mais-vendidos/MLB2097": ML_PAGE.replace(">Mini GT<", ">Outra marca<")}
         def page(u):

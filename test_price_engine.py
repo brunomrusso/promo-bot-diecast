@@ -31,6 +31,18 @@ class PriceEngineTests(unittest.TestCase):
         self.path_patch = patch.object(db, "DB_PATH", Path(self.temp.name) / "deals.db")
         self.path_patch.start()
 
+    def test_ml_consultado_no_maximo_de_hora_em_hora(self):
+        import main
+        with patch("main.time.time", return_value=1_000_000.0):
+            self.assertTrue(main._ml_na_vez())
+        with patch("main.time.time", return_value=1_000_000.0 + 15 * 60):
+            self.assertFalse(main._ml_na_vez())  # 15 min depois: pula o ML
+        with patch("main.time.time", return_value=1_000_000.0 + 60 * 60):
+            self.assertTrue(main._ml_na_vez())
+        db.set_setting("ml_intervalo_min", 15)
+        with patch("main.time.time", return_value=1_000_000.0 + 75 * 60):
+            self.assertTrue(main._ml_na_vez())
+
     def tearDown(self):
         self.path_patch.stop()
         gc.collect()
