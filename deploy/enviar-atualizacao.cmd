@@ -1,14 +1,14 @@
 @echo off
 setlocal
-rem Envia para a VM os arquivos de deploy\manifesto.txt e aplica (com conferencia e backup).
+rem Envia o bot para o servidor: confere, testa, guarda a versao (deploy\voltar-versao.cmd desfaz) e reinicia.
 set "KEY=C:\Users\bruno\Downloads\ssh-key-2026-11-05.key"
 set "SERVER=ubuntu@187.41.122.7"
 cd /d "%~dp0.."
-tar -czf "%TEMP%\promobot-update.tgz" --exclude=__pycache__ core scrapers templates static deploy main.py dashboard.py config.py test_site_export.py test_price_engine.py test_site_ranking.py
+tar -czf "%TEMP%\promobot-update.tgz" --exclude=__pycache__ --exclude=*.db --exclude=*.db-* --exclude=core/backups --exclude=.fuse_hidden* core scrapers templates static deploy main.py dashboard.py config.py requirements.txt .gitignore .gitattributes test_site_export.py test_price_engine.py test_site_ranking.py
 if errorlevel 1 goto erro
 scp -i "%KEY%" "%TEMP%\promobot-update.tgz" deploy\aplicar-atualizacao.sh %SERVER%:~/
 if errorlevel 1 goto erro
-ssh -t -i "%KEY%" %SERVER% "bash ~/aplicar-atualizacao.sh"
+ssh -t -i "%KEY%" %SERVER% "bash ~/aplicar-atualizacao.sh 'Envio %date% %time:~0,5%'"
 if errorlevel 1 (
   echo.
   echo ############################################################
