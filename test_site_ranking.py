@@ -174,6 +174,18 @@ class SiteRankingTests(unittest.TestCase):
         self.assertEqual((hw["MLBU2"]["preco"], hw["MLBU2"]["quando"], hw["MLBU2"]["pos"]), (30.0, "2026-11-05T10:00", 3))
         self.assertTrue(any("barrado" in a for a in sr._avisos))
 
+    def test_links_amazon_antigos_viram_id_do_site(self):
+        prod = {"produtos": [{"id": "az-funko-04", "loja": "amazon", "asin": "B0FUNKO004",
+                              "link_afiliado": "https://www.amazon.com.br/dp/B0FUNKO004?tag=promocoesdiec-20"},
+                             {"id": "az-lego-01", "loja": "amazon", "asin": "B0LEGO0001", "link_afiliado": "https://link.amazon/x"},
+                             {"id": "lego-01", "loja": "mercadolivre", "id_ml": "MLB1", "link_afiliado": "https://meli.la/a"}]}
+        with patch("config.AMAZON_TAG_SITE", "russosite-20"), patch("config.AMAZON_TAG", "russowhats-20"):
+            out = sr.amazon_links_do_site(prod)
+            sr.check_safe(prod, out)  # não pode recusar por "link inválido"
+        self.assertEqual([p["link_afiliado"] for p in out["produtos"]],
+                         ["https://www.amazon.com.br/dp/B0FUNKO004?tag=russosite-20",
+                          "https://www.amazon.com.br/dp/B0LEGO0001?tag=russosite-20", "https://meli.la/a"])
+
     def test_marca_que_sumiu_nao_pausa_o_ml(self):
         pages = {sr.ML + "/mais-vendidos/MLB2097": ML_PAGE.replace(">Mini GT<", ">Outra marca<")}
         def page(u):

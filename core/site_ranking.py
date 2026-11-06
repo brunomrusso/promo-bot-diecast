@@ -409,6 +409,17 @@ def merge_partial(current, new, groups):
     return dict(new, produtos=out)
 
 
+def amazon_links_do_site(prod):
+    """Todo link da Amazon no site usa o ID de rastreamento do site, inclusive das categorias que não foram
+    atualizadas nesta rodada (links antigos com promocoesdiec-20 ou link.amazon passam a russosite-20)."""
+    out = []
+    for p in prod.get("produtos", []):
+        if p.get("loja") == "amazon" and p.get("asin"):
+            p = dict(p, link_afiliado=f"{AZ}/dp/{p['asin']}?tag={config.AMAZON_TAG_SITE}")
+        out.append(p)
+    return dict(prod, produtos=out)
+
+
 def counts(prod):
     c = {}
     for p in prod.get("produtos", []):
@@ -858,7 +869,7 @@ def run(publish=False, origem="painel", escopo=None):
                 return _new_ml_link(id_ml)
 
             novo, report = assemble(current, ach, ml, az, hoje, link_com_progresso)
-            produtos = merge_partial(current, novo, groups)
+            produtos = amazon_links_do_site(merge_partial(current, novo, groups))
             keep = {(p.get("loja", "mercadolivre"), p.get("id_ml") or p.get("asin")) for p in produtos["produtos"]}
             report["removidos"] = [f"{'Amazon' if p.get('loja') == 'amazon' else 'ML'} {p.get('categoria')}: {p.get('nome', '')[:50]}"
                                    for p in current.get("produtos", []) if (p.get("loja", "mercadolivre"), p.get("id_ml") or p.get("asin")) not in keep]
@@ -1036,7 +1047,7 @@ def publish_preview():
     groups = {(l, c) for l in esc["lojas"] for c in esc["cats"]} - {("mercadolivre", c) for c in st.get("pulados") or []}
     if groups:
         # o site pode ter mudado depois da prévia: reaplica só os grupos da prévia sobre o site atual
-        produtos = merge_partial(current, produtos, groups)
+        produtos = amazon_links_do_site(merge_partial(current, produtos, groups))
         check_safe(current, produtos)
     _publish_files(current, produtos if groups else None, ach_new if esc.get("achadinhos") else None)
     st.update(publicado=True, origem=st.get("origem", "") + " → publicada pelo painel",
