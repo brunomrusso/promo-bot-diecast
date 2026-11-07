@@ -355,6 +355,23 @@ class SiteRankingTests(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.kwargs["escopo"], {"cats": [], "lojas": [], "achadinhos": True})
 
+    @patch("core.site_ranking.run")
+    def test_agenda_com_varias_categorias(self, run):
+        run.return_value = {}
+        ag = sr.save_agenda([{"hora": "07:10", "escopo": {"cats": ["lego", "funko"], "lojas": ["mercadolivre", "amazon"], "achadinhos": False}},
+                             {"hora": "19:10", "escopo": {"cats": ["hot-wheels"], "lojas": ["amazon"], "achadinhos": True}}])
+        self.assertEqual([a["escopo_txt"] for a in ag], ["LEGO, Funko", "Hot Wheels (só Amazon) + achadinhos"])
+        with self.assertRaises(ValueError):
+            sr.save_agenda([{"hora": "08:00", "escopo": {"cats": [], "lojas": [], "achadinhos": False}}])
+        from datetime import datetime
+        with patch("core.site_ranking.datetime") as dt:
+            dt.now.return_value = datetime(2026, 11, 6, 7, 15, tzinfo=sr.ZONE)
+            sr.maybe_run(); sr.maybe_run()
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.kwargs["escopo"]["cats"], ["lego", "funko"])
+        db.set_setting(sr.AGENDA_KEY, [{"hora": "06:40", "oque": "tudo", "ativo": True}])  # formato antigo salvo
+        self.assertEqual(sr.get_agenda()[0]["escopo_txt"], "tudo")
+
     def test_stale_chrome_lock_removed(self):
         import os, socket
         from scrapers import ml_coupons

@@ -37,7 +37,9 @@
   </div>
   <section class="panel monitored-list">
     <small>MINIS MONITORADAS</small><h2>{{ items|length }} {{ 'mini' if items|length == 1 else 'minis' }}{% if active_filter == 'all' %} {{ 'cadastrada' if items|length == 1 else 'cadastradas' }}{% endif %}</h2>
-    <form method="get" class="mini-tag-filter"><input type="hidden" name="f" value="{{ active_filter }}"><label for="mini-tag-filter">Buscar por tag<input id="mini-tag-filter" name="tag" list="mini-tag-options" value="{{ selected_tag }}" placeholder="Escolha ou digite uma tag" autocomplete="off"></label><datalist id="mini-tag-options">{% for tag in tags %}<option value="{{ tag }}">{% endfor %}</datalist><button class="button">Filtrar</button>{% if selected_tag %}<a class="button" href="{{ url_for('monitored', f=active_filter) }}">Limpar tag</a>{% endif %}</form>
+    <div class="mini-searches">
+    <div class="mini-name-search"><label for="mini-busca">Buscar por nome<input id="mini-busca" type="search" placeholder="Ex.: skyline, mustang, 1138" autocomplete="off"></label><small id="mini-busca-n" aria-live="polite"></small></div>
+    <form method="get" class="mini-tag-filter"><input type="hidden" name="f" value="{{ active_filter }}"><label for="mini-tag-filter">Buscar por tag<input id="mini-tag-filter" name="tag" list="mini-tag-options" value="{{ selected_tag }}" placeholder="Escolha ou digite uma tag" autocomplete="off"></label><datalist id="mini-tag-options">{% for tag in tags %}<option value="{{ tag }}">{% endfor %}</datalist><button class="button">Filtrar</button>{% if selected_tag %}<a class="button" href="{{ url_for('monitored', f=active_filter) }}">Limpar tag</a>{% endif %}</form></div>
     <nav class="monitored-filters" aria-label="Filtrar minis">
       <a class="filter-chip {{ 'active' if active_filter == 'all' }}" href="{{ url_for('monitored', tag=selected_tag) }}">Todas · {{ counts.all }}</a>
       <a class="filter-chip {{ 'active' if active_filter == 'atingido' }}" href="{{ url_for('monitored', tag=selected_tag, f='atingido') }}">Alvo atingido · {{ counts.atingido }}</a>
@@ -96,6 +98,7 @@
       </article>
     {% else %}<p class="empty">{{ 'Nenhuma mini neste filtro.' if active_filter != 'all' else 'Use “Cadastrar mini” para iniciar um monitoramento.' }}</p>{% endfor %}
     </div>
+    <p class="empty" id="mini-busca-vazio" hidden>Nenhuma mini com esse nome neste filtro.</p>
     {% if legacy_alerts %}
     <details class="legacy-alerts">
       <summary>Alertas antigos ({{ legacy_alerts|length }}) — cadastre a mini correspondente para monitorar de verdade</summary>
@@ -114,6 +117,13 @@
 {% endblock %}
 {% block scripts %}
 <script>
+(()=>{const q=document.getElementById('mini-busca'),n=document.getElementById('mini-busca-n'),vazio=document.getElementById('mini-busca-vazio');
+ const norm=t=>(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const cards=[...document.querySelectorAll('.monitored-card')].map(c=>({c,t:norm((c.querySelector('h3')||{}).textContent+' '+[...c.querySelectorAll('.mini-tag')].map(x=>x.textContent).join(' '))}));
+ function filtra(){const termos=norm(q.value).split(/\s+/).filter(Boolean);let vis=0;
+  cards.forEach(({c,t})=>{const ok=termos.every(w=>t.includes(w));c.hidden=!ok;if(ok)vis++});
+  n.textContent=termos.length?vis+' de '+cards.length:'';vazio.hidden=!(termos.length&&!vis)}
+ q.addEventListener('input',filtra);q.addEventListener('keydown',e=>{if(e.key==='Escape'){q.value='';filtra()}});})();
 const existingMiniTags={{ tags|tojson }};
 document.querySelectorAll('.mini-tags-input').forEach(input=>{
   const normalize=value=>value.trim().replace(/\s+/g,' ').toLocaleLowerCase('pt-BR');

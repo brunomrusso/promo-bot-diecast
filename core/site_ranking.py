@@ -980,26 +980,48 @@ def oque_escopo(oque):
 
 
 def default_agenda():
-    return [{"hora": h, "oque": "tudo", "ativo": True} for h in RUN_TIMES]
+    return [{"hora": h, "escopo": norm_escopo(None), "ativo": True} for h in RUN_TIMES]
+
+
+def _item_escopo(i):
+    """Escopo do horário: novo formato {"escopo": {...}} ou o antigo {"oque": "lego"}."""
+    if isinstance(i.get("escopo"), dict):
+        return norm_escopo(i["escopo"])
+    oque = str(i.get("oque", "tudo"))
+    if oque not in OQUE:
+        raise ValueError(f"Opção inválida: {oque}")
+    return norm_escopo(oque_escopo(oque))
+
+
+def _agenda_view(itens):
+    return [dict(i, escopo_txt=escopo_label(i["escopo"])) for i in itens]
 
 
 def get_agenda():
     ag = db.get_setting(AGENDA_KEY, None)
-    return ag if isinstance(ag, list) else default_agenda()
+    if not isinstance(ag, list):
+        return _agenda_view(default_agenda())
+    try:
+        return _agenda_view(validate_agenda(ag))
+    except ValueError:
+        return _agenda_view(default_agenda())
 
 
 def validate_agenda(itens):
     out, seen = [], set()
     for i in itens or []:
-        hora, oque = str(i.get("hora", "")).strip(), str(i.get("oque", "tudo"))
+        hora = str(i.get("hora", "")).strip()
         if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", hora):
             raise ValueError(f"Horário inválido: '{hora}' (use HH:MM)")
-        if oque not in OQUE:
-            raise ValueError(f"Opção inválida: {oque}")
-        if (hora, oque) in seen:
+        try:
+            esc = _item_escopo(i)
+        except ValueError as exc:
+            raise ValueError(f"{hora}: {exc}")
+        chave = (hora, escopo_label(esc))
+        if chave in seen:
             continue
-        seen.add((hora, oque))
-        out.append({"hora": hora, "oque": oque, "ativo": bool(i.get("ativo", True))})
+        seen.add(chave)
+        out.append({"hora": hora, "escopo": esc, "ativo": bool(i.get("ativo", True))})
     if len(out) > AGENDA_MAX:
         raise ValueError(f"No máximo {AGENDA_MAX} horários.")
     return sorted(out, key=lambda x: x["hora"])
@@ -1008,7 +1030,7 @@ def validate_agenda(itens):
 def save_agenda(itens):
     ag = validate_agenda(itens)
     db.set_setting(AGENDA_KEY, ag)
-    return ag
+    return _agenda_view(ag)
 
 
 def due_slot(now=None):
@@ -1020,7 +1042,7 @@ def due_slot(now=None):
             continue
         h, m = map(int, item["hora"].split(":"))
         start = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        key = f"{now:%Y-%m-%d} {item['hora']} {item['oque']}"
+        key = f"{now:%Y-%m-%d} {item['hora']} {item['escopo_txt']}"
         if 0 <= (now - start).total_seconds() < WINDOW_MIN * 60 and key not in done:
             return key, item
     return None, None
@@ -1033,7 +1055,8 @@ def maybe_run():
         return None
     done = (db.get_setting(DONE_KEY, []) or [])[-40:]
     db.set_setting(DONE_KEY, done + [key])
-    return run(publish=(mode() == "publicar"), origem=f"automático {item['hora']}", escopo=oque_escopo(item["oque"]))
+    esc = None if item["escopo_txt"] == "tudo" else item["escopo"]
+    return run(publish=(mode() == "publicar"), origem=f"automático {item['hora']}", escopo=esc)
 
 
 def publish_preview():
