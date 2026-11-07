@@ -127,7 +127,7 @@ def add(url, preco_alvo, categoria, extract=None):
     link, etiqueta = deal.get("affiliate_url") or "", None
     if deal.get("store") == "Mercado Livre" and config.ML_TAG_SITE:
         from core.affiliate import ml_site_link
-        site_link = ml_site_link(deal.get("url", ""))  # etiqueta do site
+        site_link = ml_site_link(deal.get("url", ""), insistir=True)  # etiqueta do site
         if site_link.startswith("https://meli.la/"):
             link, etiqueta = site_link, config.ML_TAG_SITE
     link = link or to_affiliate_url(deal)

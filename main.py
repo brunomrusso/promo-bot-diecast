@@ -17,7 +17,7 @@ from scrapers.mercadolivre_pw import reset_comparison_budget
 
 
 def _is_quiet():
-    """Check if we're inside the quiet period (no notifications)."""
+    """Horário silencioso: sem buscas, sem ranking automático e sem avisos no Telegram."""
     settings = db.get_setting("schedule", {
         "quiet_start": "23:00", "quiet_end": "08:00",
         "timezone": "America/Sao_Paulo"})
@@ -145,6 +145,10 @@ def _notify_pending_after_quiet():
 
 
 def check_deals():
+    if _is_quiet():  # horário silencioso: nenhuma busca (economiza proxy); pedidos feitos no painel seguem rodando
+        db.set_system_state("heartbeat", {"phase": "quiet"})
+        print("[*] horário silencioso: ciclo de buscas pulado")
+        return
     started = time.time()
     db.set_system_state("cycle", {"status": "running", "started_at": started})
     db.set_system_state("heartbeat", {"phase": "cycle_start"})
@@ -189,7 +193,8 @@ def main():
                     db.set_system_state("heartbeat", {"phase": "idle"})
                     last_heartbeat = time.time()
                     try:
-                        site_ranking.maybe_run()   # ranking do site: 06:40 e 18:40 (Brasília)
+                        if not _is_quiet():
+                            site_ranking.maybe_run()   # ranking do site: 06:40 e 18:40 (Brasília)
                     except Exception as exc:
                         print(f"[!] ranking do site: {exc}")
                 time.sleep(3)

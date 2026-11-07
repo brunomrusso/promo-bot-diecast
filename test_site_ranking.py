@@ -161,7 +161,8 @@ class SiteRankingTests(unittest.TestCase):
             sr._avisos.clear(); sr._pulados.clear()
             out = sr.collect_ml_api(["mini-gt", "hot-wheels"], current, page_html=lambda u: pagina, api_rank=rank, api_prod=prod)
         hw = {x["id"]: x for x in out["hot-wheels"]}
-        self.assertEqual(sorted(hw), ["MLB35762220", "MLBU1", "MLBU2"])  # MLBU2: fora da página, mas já estava no site; MLBU9 (novo, sem dados) fica de fora
+        self.assertEqual(sorted(hw), ["MLB35762220", "MLBU1"])  # página lida: MLBU2 (sumiu da página) saiu do ar; MLBU9 (novo, sem dados) fica de fora
+        self.assertTrue(any("saíram do ar" in a for a in sr._avisos))
         self.assertEqual((hw["MLBU1"]["pos"], hw["MLBU1"]["preco"]), (2, 21.0))  # posição da API, preço da página
         self.assertEqual(sr._pulados, {"mini-gt"})
         def barrado(u):

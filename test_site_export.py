@@ -214,6 +214,26 @@ class ExpiryAndQuietTests(unittest.TestCase):
             main._notify_pending_after_quiet()
         send.assert_called_once()
 
+    def test_link_do_site_recusado_nao_tenta_a_cada_ciclo(self):
+        from core import affiliate
+        url = "https://produto.mercadolivre.com.br/MLB-123"
+        chamadas = []
+        def gerar(u, tag, fallback=True):
+            chamadas.append(u)
+            return u  # o ML recusou (HTTP 400/409): volta o próprio link, sem meli.la
+        with patch("config.ML_TAG_SITE", "russosite"), patch("scrapers.ml_coupons.ml_affiliate_link", gerar), \
+             patch("scrapers.ml_coupons.ml_available", lambda: True):
+            self.assertEqual(affiliate.ml_site_link(url), url)
+            self.assertEqual(affiliate.ml_site_link(url), "")  # próximo ciclo: não reabre o Gerador de Links
+            self.assertEqual(len(chamadas), 1)
+            affiliate.ml_site_link(url, insistir=True)  # pedido do painel tenta mesmo assim
+            self.assertEqual(len(chamadas), 2)
+        ok = lambda u, tag, fallback=True: "https://meli.la/abc"
+        with patch("config.ML_TAG_SITE", "russosite"), patch("scrapers.ml_coupons.ml_affiliate_link", ok), \
+             patch("scrapers.ml_coupons.ml_available", lambda: True):
+            self.assertEqual(affiliate.ml_site_link(url, insistir=True), "https://meli.la/abc")
+        self.assertNotIn(url, db.get_setting(affiliate.ML_LINK_FALHAS_KEY, {}))
+
 
 if __name__ == "__main__":
     unittest.main()

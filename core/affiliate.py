@@ -40,8 +40,26 @@ def _cache_store(store: str) -> str:
     return f"{store}#{config.ML_TAG_BOT}" if store == "Mercado Livre" and config.ML_TAG_BOT else store
 
 
-def ml_site_link(product_url: str, generate: bool = True) -> str:
-    """meli.la do SITE (etiqueta do site). Sem etiqueta configurada, usa o link normal do bot."""
+ML_LINK_FALHAS_KEY = "ml_site_link_falhas"
+ML_LINK_FALHA_HORAS = 12  # o ML recusou (HTTP 400/409): não reabre o Gerador de Links (proxy) a cada ciclo
+
+
+def _falha_recente(falhas, product_url, agora):
+    from datetime import datetime, timedelta
+    quando = falhas.get(product_url)
+    try:
+        return bool(quando) and agora - datetime.fromisoformat(quando) < timedelta(hours=ML_LINK_FALHA_HORAS)
+    except ValueError:
+        return False
+
+
+def ml_site_link(product_url: str, generate: bool = True, insistir: bool = False) -> str:
+    """meli.la do SITE (etiqueta do site). Sem etiqueta configurada, usa o link normal do bot.
+
+    Se o ML recusou gerar o link deste anúncio, espera ML_LINK_FALHA_HORAS antes de tentar de novo
+    (antes tentava a cada ciclo de 15 min, abrindo o Gerador de Links pelo proxy o dia todo).
+    insistir=True (pedido feito no painel) tenta mesmo assim."""
+    from datetime import datetime
     from core import db
     tag = config.ML_TAG_SITE
     if not tag:
@@ -50,10 +68,24 @@ def ml_site_link(product_url: str, generate: bool = True) -> str:
     cached = db.cached_affiliate_link(f"Mercado Livre#{tag}", product_url)
     if cached:
         return cached
-    if not generate:
+    if not generate or not product_url:
         return ""
-    from scrapers.ml_coupons import ml_affiliate_link
-    return ml_affiliate_link(product_url, tag, fallback=False)
+    agora = datetime.now()
+    falhas = db.get_setting(ML_LINK_FALHAS_KEY, {}) or {}
+    if not insistir and _falha_recente(falhas, product_url, agora):
+        return ""
+    from scrapers.ml_coupons import ml_affiliate_link, ml_available
+    link = ml_affiliate_link(product_url, tag, fallback=False)
+    if is_monetized(link, "Mercado Livre"):
+        if falhas.pop(product_url, None):
+            db.set_setting(ML_LINK_FALHAS_KEY, falhas)
+        return link
+    if ml_available():  # só conta como recusa do ML se a sessão estava ok
+        falhas = {u: q for u, q in falhas.items() if _falha_recente(falhas, u, agora)}
+        falhas[product_url] = agora.isoformat(timespec="seconds")
+        db.set_setting(ML_LINK_FALHAS_KEY, falhas)
+        print(f"[ML-link] site: o ML recusou {product_url[:70]}; nova tentativa em {ML_LINK_FALHA_HORAS} h")
+    return link
 
 
 def cached_affiliate_url(deal: dict) -> str:

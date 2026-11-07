@@ -291,6 +291,8 @@ def ml_affiliate_link(product_url: str, tag: str = None, fallback: bool = True) 
         return product_url
     if tag:
         link = _ml_link_api(product_url, tag)
+        if not link and "?" in product_url:  # recusou o link com filtros (?pdp_filters=...): tenta o link limpo, na mesma página
+            link = _ml_link_api(product_url.split("?", 1)[0], tag)
         if link:
             _link_cache[key] = link
             db.cache_affiliate_link(f"Mercado Livre#{tag}", product_url, link)

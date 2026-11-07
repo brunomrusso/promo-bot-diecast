@@ -688,7 +688,7 @@ def collect_ml_api(cats, current, page_html=None, api_rank=None, api_prod=None):
             _pulados.add(c)
             _avisos.append(f"ML {NOMES[c]}: {exc}; mantive os produtos anteriores")
             continue
-        da_pagina, mantidos = {}, 0
+        da_pagina, mantidos, sairam = {}, 0, 0
         if any(e.get("type") != "PRODUCT" for e in entradas) and navegador[0]:
             cat, marca = ML_API_SOURCES[c]
             try:
@@ -707,7 +707,9 @@ def collect_ml_api(cats, current, page_html=None, api_rank=None, api_prod=None):
                 x = api_prod(pid) or da_pagina.get(pid)
             else:
                 x = da_pagina.get(pid)
-                if not x and pid in atuais:  # sem a página: reaproveita o que o site já tinha
+                if not x and da_pagina:  # a página abriu e o anúncio não está nela: saiu do ar, não reaproveita
+                    sairam += 1 if pid in atuais else 0
+                elif not x and pid in atuais:  # sem a página (navegador barrado): reaproveita o que o site já tinha
                     o = atuais[pid]
                     km = _KEY.search(o.get("imagem", ""))
                     if km and o.get("preco"):
@@ -717,7 +719,9 @@ def collect_ml_api(cats, current, page_html=None, api_rank=None, api_prod=None):
             if x:
                 itens.append(dict(x, pos=pos))
         if mantidos:
-            _avisos.append(f"ML {NOMES[c]}: {mantidos} anúncio(s) com o preço anterior (navegador indisponível)")
+            _avisos.append(f"ML {NOMES[c]}: {mantidos} anúncio(s) ficaram com o preço anterior (página do ML não foi lida)")
+        if sairam:
+            _avisos.append(f"ML {NOMES[c]}: {sairam} anúncio(s) saíram do ar e foram removidos do site")
         raw[c] = itens
     return pick_ml(raw)
 
