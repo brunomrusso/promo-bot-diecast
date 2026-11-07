@@ -5,7 +5,7 @@ rem products.json e achadinhos.json NAO vao daqui: quem cuida deles e o bot (ran
 set "KEY=C:\Users\bruno\Downloads\ssh-key-2026-11-05.key"
 set "SERVER=ubuntu@187.41.122.7"
 set "SITE=%~dp0..\..\russo-diecast-site\site"
-set "ARQUIVOS=index.html sobre.html privacidade.html assets/js/app.js assets/js/consent.js assets/css/style.css assets/img/og-image.jpg"
+set "ARQUIVOS=index.html sobre.html privacidade.html site.webmanifest assets/js/app.js assets/js/consent.js assets/css/style.css assets/img/og-image.jpg assets/img/logo.png assets/img/logo.webp assets/img/favicon.ico assets/img/icon-32.png assets/img/icon-180.png assets/img/icon-192.png assets/img/icon-512.png"
 cd /d "%SITE%" || goto erro
 tar -czf "%TEMP%\site-upload.tgz" %ARQUIVOS%
 if errorlevel 1 goto erro
