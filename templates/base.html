@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}RUSSO Diecast{% endblock %}</title>
-  <link rel="icon" type="image/png" href="{{ url_for('static', filename='emblema.png') }}">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon-black.png', v='home-v2') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='icone.png') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon-v3.png') }}">
   <meta name="apple-mobile-web-app-title" content="Diecast">
   <meta name="theme-color" content="#0d0d0d">
-  <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='minis-v27') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v='minis-v28') }}">
 </head>
 <body>
   <!-- Desktop: icon sidebar -->
   <aside class="sidebar">
-    <a class="sidebar-logo" href="{{ url_for('index') }}"><img src="{{ url_for('static', filename='novo-logo.jpeg') }}" alt="RUSSO Diecast"></a>
+    <a class="sidebar-logo" href="{{ url_for('index') }}"><img src="{{ url_for('static', filename='icone.png') }}" alt="RUSSO Diecast"></a>
     <nav>
       <a class="{{ 'active' if request.endpoint == 'index' }}" href="{{ url_for('index') }}" data-tip="Visão geral"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></a>
       <a class="{{ 'active' if request.endpoint == 'manual' }}" href="{{ url_for('manual') }}" data-tip="Criar anúncio"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></a>
@@ -30,7 +30,7 @@
       <a class="{{ 'active' if request.endpoint == 'system_health' }}" href="{{ url_for('system_health') }}" data-tip="Saúde do sistema"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span class="health-dot {{ 'online' if bot_indicator.online else 'offline' }}{{ ' warn' if bot_indicator.alerts }}"></span></a>
     </nav>
     <div class="sidebar-bottom">
-      <a class="emblem-link" href="{{ url_for('index') }}"><img class="emblem emblem-dark" src="{{ url_for('static', filename='emblema.png') }}" alt="RUSSO Diecast"><img class="emblem emblem-light" src="{{ url_for('static', filename='emblema-claro.png', v='light-v2') }}" alt="RUSSO Diecast"></a>
+      <a class="emblem-link" href="{{ url_for('index') }}"><img class="emblem emblem-dark" src="{{ url_for('static', filename='icone.png') }}" alt="RUSSO Diecast"><img class="emblem emblem-light" src="{{ url_for('static', filename='icone.png') }}" alt="RUSSO Diecast"></a>
       <a class="sidebar-logout" href="{{ url_for('logout') }}" data-tip="Sair"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg></a>
     </div>
   </aside>
@@ -57,7 +57,7 @@
   <main>
     <header class="topbar">
       <h1>{% block heading %}RUSSO Diecast{% endblock %}</h1>
-      <a class="emblem-link mobile-emblem" href="{{ url_for('index') }}"><img class="emblem emblem-dark" src="{{ url_for('static', filename='emblema.png') }}" alt="RUSSO Diecast"><img class="emblem emblem-light" src="{{ url_for('static', filename='emblema-claro.png', v='light-v2') }}" alt="RUSSO Diecast"></a>
+      <a class="emblem-link mobile-emblem" href="{{ url_for('index') }}"><img class="emblem emblem-dark" src="{{ url_for('static', filename='icone.png') }}" alt="RUSSO Diecast"><img class="emblem emblem-light" src="{{ url_for('static', filename='icone.png') }}" alt="RUSSO Diecast"></a>
     </header>
     <div id="toast-container"></div>
     {% for category, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ category }} auto-dismiss">{{ message }}</div>{% endfor %}
@@ -119,7 +119,7 @@
         });
         if(lastPending!==null && d.pending>lastPending){
           toast('Nova oferta pendente! ('+d.pending+' total)','info',5000);
-          if(Notification.permission==='granted'){new Notification('RUSSO Diecast',{body:d.pending+' ofertas aguardando aprovação',icon:'/static/novo-logo.jpeg'})}
+          if(Notification.permission==='granted'){new Notification('RUSSO Diecast',{body:d.pending+' ofertas aguardando aprovação',icon:'/static/icone.png'})}
         }
         lastPending=d.pending;
       }).catch(()=>{});
