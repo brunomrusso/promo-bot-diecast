@@ -4,7 +4,7 @@
 {% macro money(value) %}R$ {{ ('%.2f'|format(value)).replace('.', ',') }}{% endmacro %}
 {% block content %}
 {% set site_labels = {'hot-wheels': 'Hot Wheels', 'mini-gt': 'Mini GT', 'pixar-cars': 'Disney Pixar Cars', 'lego': 'LEGO', 'funko': 'Funko', 'blokees': 'Blokees', 'pokemon-tcg': 'Pokémon TCG'} %}
-<section class="split">
+<section class="split monitored-top">
   <form class="panel form-grid monitored-create {{ 'create-open' if request.args.get('name') or request.args.get('observed_price') }}" method="post">
     <button type="button" class="button wide monitored-create-toggle" aria-expanded="{{ 'true' if request.args.get('name') or request.args.get('observed_price') else 'false' }}" aria-controls="monitored-create-fields" onclick="const form=this.closest('form'),open=form.classList.toggle('create-open');this.setAttribute('aria-expanded',String(open))"><span>Cadastrar mini</span><span class="create-chevron" aria-hidden="true">⌄</span></button>
     <div class="monitored-create-fields" id="monitored-create-fields">
@@ -67,8 +67,9 @@
         </div>
         <div class="monitored-identity">
           {% if item.image %}<img class="monitored-thumb" src="{{ item.image }}" alt="{{ item.name }}" loading="lazy">{% else %}<span class="monitored-thumb monitored-no-photo" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m5 10 2-5h10l2 5M3 10h18v8H3zM7 18v2M17 18v2M6 14h2M16 14h2"/></svg></span>{% endif %}
-          <div><h3>{{ item.name }}</h3><p>{{ 'Preço coletado' if item.last_seen_at else 'Aguardando primeira coleta' }}{% if item.last_seen_at %} <span data-time="{{ item.last_seen_at }}">{{ item.last_seen_at }}</span>{% endif %}</p>{% if item.tags %}<div class="mini-tag-badges" aria-label="Tags da mini">{% for tag in item.tags %}<a class="mini-tag" href="{{ url_for('monitored', tag=tag, f=active_filter) }}">{{ tag }}</a>{% endfor %}</div>{% endif %}</div>
+          <div><h3 title="{{ item.name }}">{{ item.name }}</h3><p>{{ 'Preço coletado' if item.last_seen_at else 'Aguardando primeira coleta' }}{% if item.last_seen_at %} <span data-time="{{ item.last_seen_at }}">{{ item.last_seen_at }}</span>{% endif %}</p>{% if item.tags %}<div class="mini-tag-badges" aria-label="Tags da mini">{% for tag in item.tags %}<a class="mini-tag" href="{{ url_for('monitored', tag=tag, f=active_filter) }}">{{ tag }}</a>{% endfor %}</div>{% endif %}</div>
         </div>
+        {% if item.site_enabled %}<p class="site-badge"><small>No site · {{ site_labels.get(item.site_category, item.site_category) }}{% if not item.max_price %} · defina um preço-alvo para aparecer{% endif %}</small></p>{% endif %}
         <div class="monitored-prices">
           <div><small>Último visto</small><strong>{{ money(item.last_seen_price) if item.last_seen_price else '—' }}</strong></div>
           <div><small>Menor em 7 dias</small><strong class="monitored-best">{{ money(item.best_store.min_price) if item.best_store else '—' }}</strong></div>
@@ -79,7 +80,6 @@
           <a class="primary" href="{{ url_for('monitored_detail', item_id=item.id, scan=1) }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>Pesquisar</a>
           <a class="button" href="{{ url_for('monitored_detail', item_id=item.id) }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11a9 9 0 119 10M3 4v7h7M12 7v5l3 2"/></svg>Histórico</a>
         </div>
-        {% if item.site_enabled %}<p class="site-badge"><small>No site · {{ site_labels.get(item.site_category, item.site_category) }}{% if not item.max_price %} · defina um preço-alvo para aparecer{% endif %}</small></p>{% endif %}
         <details class="monitored-criteria"><summary>Critérios da busca</summary><p><b>Busca:</b> {{ item.search_terms }}</p><p><b>Exige:</b> {{ item.required_terms }}</p>{% if item.forbidden_terms %}<p><b>Recusa:</b> {{ item.forbidden_terms }}</p>{% endif %}{% if item.best_store %}<p><b>Menor preço coletado em 7 dias:</b> {{ item.best_store.store }} · {{ money(item.best_store.min_price) }}</p>{% endif %}</details>
         <form class="form-grid monitored-edit" id="edit-mini-{{ item.id }}" method="post" hidden>
           <input type="hidden" name="id" value="{{ item.id }}">
