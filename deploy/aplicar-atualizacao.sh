@@ -41,7 +41,7 @@ git diff --cached --name-status | sed 's/^M\t/   alterado: /; s/^A\t/   novo:   
 
 echo "== 3/4 testando"
 LOG=$(mktemp)
-if ./venv/bin/python -W ignore -m unittest test_site_export test_price_engine test_site_ranking >"$LOG" 2>&1; then
+if ./venv/bin/python -W ignore -m unittest test_site_export test_price_engine test_site_ranking test_comissoes >"$LOG" 2>&1; then
   echo "   testes: $(grep -E '^Ran ' "$LOG") - OK"; rm -f "$LOG"
 else
   grep -E '^(ERROR|FAIL):|Error|^Ran |^FAILED' "$LOG" | tail -12; rm -f "$LOG"

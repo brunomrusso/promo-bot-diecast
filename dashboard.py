@@ -27,6 +27,7 @@ Os canais são gratuitos. Preços e estoques podem mudar.
 **Qual mini você está procurando para a sua coleção?**"""
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # uploads (relatórios de comissão) até 5 MB
 app.secret_key = os.getenv("PANEL_SECRET_KEY", "change-this-key")
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -971,6 +972,49 @@ def brand_rule_delete(rule_id):
     db.delete_brand_rule(rule_id)
     flash("Regra removida", "success")
     return redirect(url_for("brand_rules"))
+
+
+@app.route("/comissoes", methods=["GET", "POST"])
+@login_required
+def comissoes():
+    from core import comissoes as cm
+    mes = request.values.get("mes") or cm.mes_anterior()
+    if request.method == "POST":
+        try:
+            cm.valida_mes(mes)
+            loja = request.form.get("loja")
+            if loja == "amazon":
+                arquivos = [f for f in request.files.getlist("arquivos") if f and f.filename]
+                if not arquivos:
+                    raise ValueError("Escolha ao menos um arquivo CSV da Amazon.")
+                feitos = []
+                for f in arquivos:
+                    texto = f.read().decode("utf-8-sig", errors="replace")
+                    canal = request.form.get("canal", "")
+                    try:
+                        tipo, n = cm.importar_amazon(texto, mes, canal)
+                        feitos.append(f"{f.filename}: {n} linha(s) ({'por canal' if tipo == 'canal' else 'por produto'})")
+                    except ValueError as exc:
+                        feitos.append(f"{f.filename}: {exc}")
+                flash("Amazon · " + " | ".join(feitos), "success")
+            elif loja == "ml":
+                tipo, n = cm.importar_ml(request.form.get("texto", ""), mes)
+                flash(f"Mercado Livre: {n} {'venda(s)' if tipo == 'venda' else 'etiqueta(s)'} importada(s)", "success")
+            elif loja == "apagar":
+                cm.apagar_mes(request.form.get("qual"), mes)
+                flash("Importação apagada", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("comissoes", mes=mes))
+    try:
+        cm.valida_mes(mes)
+    except ValueError:
+        mes = cm.mes_anterior()
+    canais_amz = [("", "Tudo (todos os IDs)"), (config.AMAZON_TAG, "WhatsApp · " + config.AMAZON_TAG),
+                  (getattr(config, "AMAZON_TAG_SITE", ""), "Site · " + getattr(config, "AMAZON_TAG_SITE", "")),
+                  ("promocoesdiec-20", "ID antigo · promocoesdiec-20")]
+    return render_template("comissoes.html", mes=mes, r=cm.resumo(mes), meses=sorted(set(cm.meses()) | {mes}, reverse=True),
+                           hist=cm.historico(), canais_amz=[c for c in canais_amz if c[0] or c[1].startswith("Tudo")])
 
 
 @app.route("/blacklist", methods=["GET", "POST"])

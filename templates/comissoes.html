@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block title %}Comissões · RUSSO Diecast{% endblock %}
+{% block heading %}Comissões{% endblock %}
+{% macro money(v) %}R$ {{ ('{:,.2f}'.format(v or 0)).replace(',', 'X').replace('.', ',').replace('X', '.') }}{% endmacro %}
+{% set NOMES_MES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'] %}
+{% macro mes_txt(m) %}{{ NOMES_MES[m[5:]|int - 1] }}/{{ m[:4] }}{% endmacro %}
+{% block content %}
+{% set amz = r.lojas['Amazon'] %}{% set ml = r.lojas['Mercado Livre'] %}
+<section class="panel cm-head">
+  <div><small>RELATÓRIO DO MÊS</small><h2>{{ mes_txt(mes)|capitalize }}</h2></div>
+  <form method="get" class="cm-mes"><label>Mês<input type="month" name="mes" value="{{ mes }}" onchange="this.form.submit()"></label>
+    {% if meses|length > 1 %}<nav class="cm-meses">{% for m in meses[:6] %}<a class="filter-chip {{ 'active' if m == mes }}" href="{{ url_for('comissoes', mes=m) }}">{{ mes_txt(m) }}</a>{% endfor %}</nav>{% endif %}</form>
+</section>
+
+<section class="stats cm-stats">
+  <article><span>Total do mês</span><strong>{{ money(r.total) }}</strong><small>Amazon + Mercado Livre</small></article>
+  <article><span>Amazon</span><strong>{{ money(amz.ganho) }}</strong><small>{{ amz.cliques }} cliques · {{ amz.unidades }} produto(s) enviado(s)</small></article>
+  <article><span>Mercado Livre</span><strong>{{ money(ml.ganho) }}</strong><small>{{ ml.cliques }} cliques · {{ ml.unidades }} venda(s) válida(s)</small></article>
+  <article><span>Conversão</span><strong>{% set ck = amz.cliques + ml.cliques %}{{ ('%.1f'|format(100 * (amz.unidades + ml.unidades) / ck)).replace('.', ',') ~ '%' if ck else '—' }}</strong><small>produtos vendidos por clique</small></article>
+</section>
+
+{% if not r.total and not amz.cliques and not ml.cliques and not ml.vendas %}
+<p class="flash">Nenhum relatório importado para {{ mes_txt(mes) }}. Use a área “Importar relatórios” no fim da página.</p>
+{% endif %}
+
+<section class="cm-grid">
+  <div class="panel">
+    <small>POR CANAL</small><h2>De onde veio a comissão</h2>
+    {% set linhas = [] %}
+    <div class="table-wrap"><table><thead><tr><th>Loja</th><th>Canal</th><th class="n">Cliques</th><th class="n">Vendidos</th><th class="n">Comissão</th></tr></thead><tbody>
+    {% for loja, d in [('Amazon', amz), ('Mercado Livre', ml)] %}{% for c in d.canais %}
+      <tr><td>{{ loja }}</td><td><b>{{ c.canal }}</b><br><small class="muted">{{ c.tags|join(', ') }}</small></td><td class="n">{{ c.cliques }}</td><td class="n">{{ c.unidades }}</td><td class="n">{{ money(c.ganho) }}</td></tr>
+    {% endfor %}{% endfor %}
+    {% if not amz.canais and not ml.canais %}<tr><td colspan="5" class="empty">Importe o Tracking-Id da Amazon e a aba “Etiquetas de rastreamento” do ML.</td></tr>{% endif %}
+    </tbody></table></div>
+    <p class="health-note">Os IDs novos (WhatsApp e site) existem desde 6/11; antes disso tudo aparece como “ID antigo”.</p>
+  </div>
+  <div class="panel">
+    <small>HISTÓRICO</small><h2>Mês a mês</h2>
+    {% set maxv = (hist|map(attribute='total')|max) if hist else 0 %}
+    {% for h in hist|reverse %}
+    <a class="cm-hist {{ 'active' if h.mes == mes }}" href="{{ url_for('comissoes', mes=h.mes) }}"><span>{{ mes_txt(h.mes) }}</span>
+      <i><b class="amz" style="width:{{ (100 * h.amazon / maxv) if maxv else 0 }}%"></b><b class="ml" style="width:{{ (100 * h.ml / maxv) if maxv else 0 }}%"></b></i><strong>{{ money(h.total) }}</strong></a>
+    {% else %}<p class="empty">O histórico aparece conforme você importa os meses.</p>{% endfor %}
+    {% if hist %}<p class="health-note"><span class="cm-dot amz"></span> Amazon <span class="cm-dot ml"></span> Mercado Livre</p>{% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <small>PRODUTOS</small><h2>O que mais gerou comissão</h2>
+  <div class="table-wrap"><table><thead><tr><th>Produto</th><th>Loja · canal</th><th class="n">Cliques</th><th class="n">Vendidos</th><th class="n">Comissão</th></tr></thead><tbody>
+  {% set tops = [] %}
+  {% for loja, d in [('Amazon', amz), ('Mercado Livre', ml)] %}{% for p in d.top %}{% if p.ganho or p.unidades %}{% set _ = tops.append((loja, p)) %}{% endif %}{% endfor %}{% endfor %}
+  {% for loja, p in tops|sort(attribute='1.ganho', reverse=true) %}
+    <tr><td class="cm-prod">{{ p.item }}{% if p.item_id and p.item_id != 'Other' %}<br><small class="muted">{{ p.item_id }}</small>{% endif %}</td><td>{{ loja }}{% if p.canais %} · {{ p.canais|join(', ') }}{% endif %}</td><td class="n">{{ p.cliques or '—' }}</td><td class="n">{{ p.unidades }}</td><td class="n"><b>{{ money(p.ganho) }}</b>{% if r.total %}<br><small class="muted">{{ (100 * p.ganho / r.total)|round|int }}% do mês</small>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="5" class="empty">Importe o Linked-Product da Amazon e a aba “Vendas” do ML.</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if amz.sem_venda %}<details class="cm-sem"><summary>{{ amz.sem_venda|length }} produto(s) com 10+ cliques e nenhuma venda</summary><ul>{% for p in amz.sem_venda %}<li>{{ p.item }} — {{ p.cliques }} cliques</li>{% endfor %}</ul></details>{% endif %}
+</section>
+
+{% if ml.vendas %}
+<section class="panel">
+  <small>MERCADO LIVRE</small><h2>Vendas do mês</h2>
+  <div class="table-wrap"><table><thead><tr><th>Data</th><th>Produto</th><th>Loja</th><th class="n">Venda</th><th class="n">Comissão</th><th>Situação</th></tr></thead><tbody>
+  {% for v in ml.vendas %}
+    <tr><td>{{ v.data[8:] }}/{{ v.data[5:7] }}</td><td class="cm-prod">{{ v.item }}<br><small class="muted">#{{ v.pedido }}</small></td><td>{{ v.vendedor }}</td><td class="n">{{ money(v.vendas) }}</td><td class="n">{{ money(v.ganho) }}</td>
+      <td><span class="cm-st {{ 'bad' if v.estado|lower in ('recusada', 'cancelada') else ('ok' if v.estado|lower in ('aprovada', 'paga', 'liberada', 'confirmada') else 'wait') }}">{{ v.estado or '—' }}</span>{% if v.motivo %}<br><small class="muted">{{ v.motivo }}</small>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% if ml.vendas|selectattr('motivo', 'equalto', 'Conta vinculada')|list %}<p class="health-note">“Conta vinculada”: o ML não paga comissão quando a compra parece ter sido feita por você ou por uma conta ligada à sua.</p>{% endif %}
+</section>
+{% endif %}
+
+<section class="panel" id="importar">
+  <small>IMPORTAR RELATÓRIOS DE {{ mes_txt(mes)|upper }}</small><h2>Importar relatórios</h2>
+  <p>Reimportar o mesmo relatório do mesmo mês substitui o anterior (não duplica).</p>
+  <div class="cm-grid">
+    <form class="cm-imp" method="post" enctype="multipart/form-data"><input type="hidden" name="loja" value="amazon"><input type="hidden" name="mes" value="{{ mes }}">
+      <h3>Amazon <span class="cm-ok">{% if amz.importado.canal %}✓ Tracking-Id{% endif %}{% if amz.importado.produto %} ✓ Linked-Product{% endif %}</span></h3>
+      <ol class="cm-passos"><li>Associados → Relatórios → período do mês → formato <b>CSV</b>.</li><li><b>Tracking-Id</b> com ID “Tudo”.</li><li><b>Linked-Product</b> uma vez para cada ID (escolha abaixo de qual é).</li></ol>
+      <label>Arquivos CSV<input type="file" name="arquivos" accept=".csv,text/csv" multiple required></label>
+      <label>O Linked-Product é do ID<select name="canal">{% for v, t in canais_amz %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select><small class="muted">Só vale para o Linked-Product; o Tracking-Id já separa os canais.</small></label>
+      <button class="primary">Importar Amazon</button>
+    </form>
+    <form class="cm-imp" method="post"><input type="hidden" name="loja" value="ml"><input type="hidden" name="mes" value="{{ mes }}">
+      <h3>Mercado Livre <span class="cm-ok">{% if ml.importado.canal %}✓ Etiquetas{% endif %}{% if ml.importado.venda %} ✓ Vendas{% endif %}</span></h3>
+      <ol class="cm-passos"><li>Afiliados → Métricas → período do mês.</li><li>Aba <b>Vendas</b>: selecione a tabela, copie (Ctrl+C) e cole aqui.</li><li>Depois a aba <b>Etiquetas de rastreamento</b>, do mesmo jeito.</li></ol>
+      <label>Texto copiado<textarea name="texto" rows="7" placeholder="Cole aqui a tabela da aba Vendas ou da aba Etiquetas de rastreamento" required></textarea></label>
+      <button class="primary">Importar Mercado Livre</button>
+    </form>
+  </div>
+  {% if amz.importado.canal or amz.importado.produto or ml.importado.canal or ml.importado.venda %}
+  <details class="cm-sem"><summary>Apagar importações deste mês</summary>
+    <div class="cm-apagar">{% for v, t in [('Amazon', 'Apagar Amazon de ' ~ mes_txt(mes)), ('Mercado Livre', 'Apagar Mercado Livre de ' ~ mes_txt(mes))] %}
+    <form method="post"><input type="hidden" name="loja" value="apagar"><input type="hidden" name="qual" value="{{ v }}"><input type="hidden" name="mes" value="{{ mes }}"><button class="button" onclick="return confirm('{{ t }}?')">{{ t }}</button></form>{% endfor %}</div></details>
+  {% endif %}
+</section>
+<style>
+.cm-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:20px}.cm-mes{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.cm-mes label{width:190px}.cm-mes input{margin-top:6px}.cm-meses{display:flex;gap:6px;flex-wrap:wrap}
+.cm-stats{grid-template-columns:repeat(4,minmax(0,1fr))}.cm-stats strong{font-size:28px}
+.cm-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:20px;margin-bottom:20px}.cm-grid>.panel{margin:0}
+section.panel{margin-bottom:20px}.panel small.muted,.panel .cm-imp small.muted{color:var(--muted);letter-spacing:0;text-transform:none;font-weight:400;font-size:11px}th.n,td.n{text-align:right;white-space:nowrap}.muted{color:var(--muted)}.cm-prod{min-width:220px}
+.cm-hist{display:grid;grid-template-columns:120px 1fr auto;gap:10px;align-items:center;padding:9px 6px;border-radius:8px;color:inherit;text-decoration:none;font-size:13px}.cm-hist.active,.cm-hist:hover{background:var(--surface2)}.cm-hist i{display:flex;height:10px;border-radius:6px;background:var(--surface2);overflow:hidden}.cm-hist b{display:block;height:100%}.amz{background:#f6d55c}.ml{background:#4a9eff}.cm-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin:0 4px 0 10px;vertical-align:middle}
+.cm-st{display:inline-block;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700}.cm-st.ok{background:#173326;color:#65dfa0}.cm-st.bad{background:#362022;color:#ff8b89}.cm-st.wait{background:#3a3017;color:#ffd466}
+.cm-imp{display:grid;gap:12px;align-content:start;background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:18px}.cm-imp h3{margin:0;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.cm-ok{color:var(--green);font-size:12px;font-weight:600}.cm-passos{margin:0;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.6}.cm-imp textarea{font-size:12px}.cm-imp input[type=file]{padding:10px}
+.cm-sem{margin-top:12px;font-size:13px;color:var(--muted)}.cm-sem summary{cursor:pointer}.cm-apagar{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+@media(max-width:900px){.cm-grid{grid-template-columns:1fr}.cm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.cm-stats strong{font-size:22px}.cm-hist{grid-template-columns:96px 1fr auto}}
+</style>
+{% endblock %}
