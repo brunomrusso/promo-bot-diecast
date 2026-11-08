@@ -19,6 +19,7 @@ import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
@@ -31,6 +32,12 @@ ML = "https://www.mercadolivre.com.br"
 AZ = "https://www.amazon.com.br"
 CATS = ["mini-gt", "hot-wheels", "pixar-cars", "lego", "funko", "blokees", "pokemon-tcg"]
 MAX_PER_CAT = 20
+# Marcas importantes: no mínimo N produtos por loja. Se o ranking não tiver o suficiente (ou sumir),
+# completa com a busca: ML pela API de catálogo (ordem de relevância do ML, sem proxy) e Amazon pela
+# busca ordenada por "Mais vendidos" (conexão direta). Esses produtos vão marcados com "destaque".
+MIN_POR_LOJA = {"mini-gt": 10}
+ML_BUSCA = {"mini-gt": ["mini gt", "kaido house"]}
+AZ_BUSCA = {"mini-gt": "mini gt 1:64"}
 RUN_TIMES = ("06:40", "18:40")          # horário de Brasília
 STATE_KEY = "site_ranking"
 MODE_KEY = "site_ranking_mode"          # "teste" | "publicar"
@@ -139,6 +146,9 @@ def ensure_cats(current):
 
 def az_name(title):
     name = title.split(" | ")[0].strip()
+    # vendedores importados escrevem "Diecast Model Car Compatible with Mini GT 1:64 ...": fica só o modelo
+    name = re.sub(r"^(?:\d:\d+\s+(?:scale\s+)?)?(?:diecast|die-cast)\s+(?:model\s+)?car\s+compatible\s+(?:with|for)\s+", "", name, flags=re.I)
+    name = re.sub(r"^modelo de carro fundido\s+(?:1:64\s+)?compat[ií]vel com\s+", "", name, flags=re.I)
     if len(name) > 95 and "," in name:
         name = name[:95].rsplit(",", 1)[0].strip()
     return name
@@ -350,6 +360,8 @@ def assemble(current, achadinhos, ml, az, hoje, new_ml_link):
                  "preco_consultado_em": x.get("quando") or hoje, "categoria": c, "posicao_ranking": rank, "link_afiliado": link}
             if etq:
                 p["etiqueta"] = etq
+            if x.get("destaque"):
+                p["destaque"] = True  # veio da busca do ML (não é posição de "mais vendidos")
             if c == "pixar-cars":
                 p["posicao_ml"] = x["pos"]
             produtos.append(p)
@@ -363,7 +375,8 @@ def assemble(current, achadinhos, ml, az, hoje, new_ml_link):
                 report["novos"].append(f"Amazon {c}: {nome[:50]}")
             produtos.append({"id": f"az-{c}-{i:02d}", "loja": "amazon", "asin": x["asin"], "nome": nome,
                              "categoria": c, "posicao_ranking": i, "posicao_amazon": x["rank"],
-                             "consultado_em": hoje, "link_afiliado": link})
+                             "consultado_em": hoje, "link_afiliado": link,
+                             **({"busca_amazon": True} if x.get("destaque") else {})})
     new_keys = {(p["loja"], p.get("id_ml") or p.get("asin")) for p in produtos}
     for p in current.get("produtos", []):
         k = (p.get("loja", "mercadolivre"), p.get("id_ml") or p.get("asin"))
@@ -668,6 +681,25 @@ def api_produto(pid):
     return {"t": p["name"], "id": pid, "preco": round(float(preco), 2), "k": k}
 
 
+def api_busca(c, quantos, excluir=(), api_prod=None):
+    """Produtos de catálogo da busca do ML (ordem de relevância do ML), com preço e foto pela API. Sem proxy."""
+    api_prod = api_prod or api_produto
+    out, vistos = [], set(excluir)
+    for q in ML_BUSCA.get(c, []):
+        s, j = _ml_api_get("/products/search", {"status": "active", "site_id": "MLB", "q": q, "limit": 50})
+        for r in (j or {}).get("results") or [] if s == 200 else []:
+            if len(out) >= quantos:
+                return out
+            pid = r.get("id")
+            if not pid or pid in vistos or not AZ_FILTERS[c](r.get("name", "")):
+                continue
+            vistos.add(pid)
+            x = api_prod(pid)
+            if x and AZ_FILTERS[c](x["t"]):
+                out.append(x)
+    return out
+
+
 def collect_ml_api(cats, current, page_html=None, api_rank=None, api_prod=None):
     """Ranking pela API. Catálogo (PRODUCT) sai completo da API. Anúncios MLBU (a API não dá preço/foto):
     lidos de 1 página filtrada por categoria no navegador logado; se o navegador estiver barrado,
@@ -685,9 +717,12 @@ def collect_ml_api(cats, current, page_html=None, api_rank=None, api_prod=None):
         try:
             entradas = api_rank(c)
         except PaginaIndisponivel as exc:
-            _pulados.add(c)
-            _avisos.append(f"ML {NOMES[c]}: {exc}; mantive os produtos anteriores")
-            continue
+            if c not in MIN_POR_LOJA:
+                _pulados.add(c)
+                _avisos.append(f"ML {NOMES[c]}: {exc}; mantive os produtos anteriores")
+                continue
+            entradas = []  # marca importante: monta pela busca do ML (abaixo), sem manter anúncio velho
+            _avisos.append(f"ML {NOMES[c]}: {exc}; usei os destaques da busca do ML")
         da_pagina, mantidos, sairam = {}, 0, 0
         if any(e.get("type") != "PRODUCT" for e in entradas) and navegador[0]:
             cat, marca = ML_API_SOURCES[c]
@@ -718,6 +753,14 @@ def collect_ml_api(cats, current, page_html=None, api_rank=None, api_prod=None):
                         mantidos += 1
             if x:
                 itens.append(dict(x, pos=pos))
+        minimo = MIN_POR_LOJA.get(c, 0)
+        filtrados = [x for x in itens if ML_FILTERS[c](x["t"])]
+        if len(filtrados) < minimo:
+            extra = api_busca(c, minimo + 2 - len(filtrados), {x["id"] for x in itens}, api_prod)
+            base = max([x.get("pos") or 0 for x in itens] + [0])
+            itens += [dict(x, pos=base + k, destaque=True) for k, x in enumerate(extra, 1)]
+            if extra:
+                _avisos.append(f"ML {NOMES[c]}: {len(extra)} produto(s) dos destaques da busca do ML para chegar a {minimo}")
         if mantidos:
             _avisos.append(f"ML {NOMES[c]}: {mantidos} anúncio(s) ficaram com o preço anterior (página do ML não foi lida)")
         if sairam:
@@ -798,7 +841,46 @@ def collect_az(cats=None):
         time.sleep(random.uniform(0.3, 0.8))
     cache.update(titles)
     db.set_setting(TITLES_KEY, dict(list(cache.items())[-3000:]))
-    return pick_az(ranks_by_node, {**cache, **titles}, cats)
+    out = pick_az(ranks_by_node, {**cache, **titles}, cats)
+    for c in cats:
+        minimo = MIN_POR_LOJA.get(c, 0)
+        if c in AZ_BUSCA and len(out.get(c, [])) < minimo:
+            _progress(f"Amazon: mais vendidos da busca de {NOMES[c]}", 86)
+            page = ctx.new_page()
+            try:
+                page.goto(f"{AZ}/s?k={quote_plus(AZ_BUSCA[c])}&s=exact-aware-popularity-rank", wait_until="domcontentloaded", timeout=45000)
+                try:
+                    page.wait_for_selector("div[data-component-type='s-search-result']", timeout=20000)
+                except Exception:
+                    if _blocked(page):
+                        raise Blocked("Amazon pediu captcha")
+                    _avisos.append(f"Amazon {NOMES[c]}: a busca não carregou")
+                    continue
+                achados = az_busca(page.content())
+            finally:
+                page.close()
+            ja = {x["asin"] for x in out.get(c, [])}
+            extra = [x for x in achados if x["asin"] not in ja and AZ_FILTERS[c](x["t"])][:minimo + 2 - len(out.get(c, []))]
+            out[c] = out.get(c, []) + [dict(x, destaque=True) for x in extra]
+            if extra:
+                _avisos.append(f"Amazon {NOMES[c]}: {len(extra)} produto(s) da busca por mais vendidos para chegar a {minimo}")
+            _pause()
+    return out
+
+
+def az_busca(html):
+    """[{asin, rank, t}] da página de busca da Amazon, na ordem da página (ignora patrocinados)."""
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    for d in soup.select("div[data-component-type='s-search-result']"):
+        asin = d.get("data-asin") or ""
+        if not re.fullmatch(r"[A-Z0-9]{10}", asin) or d.select_one(".puis-sponsored-label-text, .s-sponsored-label-text"):
+            continue
+        h = d.select_one("h2")
+        t = h.get_text(" ", strip=True) if h else ""
+        if t and asin not in {x["asin"] for x in out}:
+            out.append({"asin": asin, "rank": len(out) + 1, "t": t})
+    return out
 
 
 def _new_ml_link(id_ml):

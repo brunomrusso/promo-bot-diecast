@@ -157,14 +157,22 @@ class SiteRankingTests(unittest.TestCase):
         current = {"produtos": [{"id": "hot-wheels-05", "loja": "mercadolivre", "id_ml": "MLBU2", "nome": "HW Antigo",
                                  "preco": 30.0, "imagem": "https://http2.mlstatic.com/D_NQ_NP_2X_3-MLA4_1-F.webp",
                                  "preco_consultado_em": "2026-11-05T10:00"}]}
-        with patch("scrapers.ml_coupons.ml_available", lambda: True), patch.object(sr, "_pause", lambda: None):
+        busca = {"results": [{"id": f"MLB9{k:02d}", "name": f"Mini GT Carro {k}"} for k in range(30)] + [{"id": "MLB999", "name": "Outra marca"}]}
+        prod_mg = lambda pid: {"t": f"Mini GT {pid}", "id": pid, "preco": 150.0, "k": "724815-MLA99876815105_112025"} if pid.startswith("MLB9") else prod(pid)
+        with patch("scrapers.ml_coupons.ml_available", lambda: True), patch.object(sr, "_pause", lambda: None), \
+             patch.object(sr, "_ml_api_get", lambda path, params=None: (200, busca)):
             sr._avisos.clear(); sr._pulados.clear()
-            out = sr.collect_ml_api(["mini-gt", "hot-wheels"], current, page_html=lambda u: pagina, api_rank=rank, api_prod=prod)
+            out = sr.collect_ml_api(["mini-gt", "hot-wheels"], current, page_html=lambda u: pagina, api_rank=rank, api_prod=prod_mg)
+        mg = out["mini-gt"]  # sem ranking da marca: não fica com anúncio velho, monta pela busca até o mínimo (+2)
+        self.assertEqual(len(mg), sr.MIN_POR_LOJA["mini-gt"] + 2)
+        self.assertTrue(all(x["destaque"] for x in mg))
+        self.assertEqual([x["id"] for x in mg[:2]], ["MLB900", "MLB901"])
         hw = {x["id"]: x for x in out["hot-wheels"]}
         self.assertEqual(sorted(hw), ["MLB35762220", "MLBU1"])  # página lida: MLBU2 (sumiu da página) saiu do ar; MLBU9 (novo, sem dados) fica de fora
         self.assertTrue(any("saíram do ar" in a for a in sr._avisos))
         self.assertEqual((hw["MLBU1"]["pos"], hw["MLBU1"]["preco"]), (2, 21.0))  # posição da API, preço da página
-        self.assertEqual(sr._pulados, {"mini-gt"})
+        self.assertEqual(sr._pulados, set())
+        self.assertTrue(any("destaques da busca" in a for a in sr._avisos))
         def barrado(u):
             raise sr.Blocked("captcha")
         with patch("scrapers.ml_coupons.ml_available", lambda: True), patch.object(sr, "_pause", lambda: None):
@@ -174,6 +182,14 @@ class SiteRankingTests(unittest.TestCase):
         self.assertEqual(sorted(hw), ["MLB35762220", "MLBU2"])  # navegador barrado: MLBU2 mantido do site
         self.assertEqual((hw["MLBU2"]["preco"], hw["MLBU2"]["quando"], hw["MLBU2"]["pos"]), (30.0, "2026-11-05T10:00", 3))
         self.assertTrue(any("barrado" in a for a in sr._avisos))
+
+    def test_amazon_busca_e_nome_de_importado(self):
+        html = ('<div data-component-type="s-search-result" data-asin="B0FCCN8C5N"><h2><span>Kaido House Chevrolet Silverado by Mini GT</span></h2></div>'
+                '<div data-component-type="s-search-result" data-asin="B0SPONSOR1"><span class="puis-sponsored-label-text">Patrocinado</span><h2>Mini GT X</h2></div>'
+                '<div data-component-type="s-search-result" data-asin="B0FQ28ZYLZ"><h2>Diecast Model Car Compatible with Mini GT 1:64 Aston Martin Vantage</h2></div>')
+        self.assertEqual([(x["asin"], x["rank"]) for x in sr.az_busca(html)], [("B0FCCN8C5N", 1), ("B0FQ28ZYLZ", 2)])
+        self.assertEqual(sr.az_name("Diecast Model Car Compatible with Mini GT 1:64 Aston Martin Vantage"), "Mini GT 1:64 Aston Martin Vantage")
+        self.assertEqual(sr.az_name("1:64 Diecast Car Compatible with Mini GT Alfa Romeo C43"), "Mini GT Alfa Romeo C43")
 
     def test_links_amazon_antigos_viram_id_do_site(self):
         prod = {"produtos": [{"id": "az-funko-04", "loja": "amazon", "asin": "B0FUNKO004",
