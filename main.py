@@ -174,6 +174,9 @@ def check_deals():
 def main():
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
         sys.exit("Configure TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env")
+    presos = db.release_interrupted_jobs()  # pedidos do painel que o reinício do bot interrompeu
+    if presos:
+        print(f"[*] {presos} pedido(s) do painel interrompidos pelo reinício foram marcados como erro")
 
     if config.TELEGRAM_ADMIN_CHAT_ID:
         threading.Thread(target=approvals.poll_updates, daemon=True).start()

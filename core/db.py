@@ -1629,6 +1629,14 @@ def get_job(job_id):
         return data
 
 
+def release_interrupted_jobs():
+    """Na partida do bot nenhum pedido pode estar em andamento: os que ficaram "processing" foram
+    interrompidos pelo reinício (ex.: enviar-atualizacao no meio de uma pesquisa)."""
+    with _conn() as conn:
+        return conn.execute("UPDATE manual_jobs SET status='error',error='Interrompido pelo reinício do bot; peça de novo',"
+                            "updated_at=CURRENT_TIMESTAMP WHERE status='processing'").rowcount
+
+
 def cleanup_jobs():
     with _conn() as conn:
         conn.execute("UPDATE manual_jobs SET status='error',error='Tempo limite excedido' "
