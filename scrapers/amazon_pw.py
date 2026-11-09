@@ -76,8 +76,9 @@ def search_amazon(keyword: str, min_discount: int):
             blocked = _blocked(page)
             try:
                 body = page.inner_text("body")[:6000].lower()
+                titulo = page.title()[:70]
             except Exception:
-                body = ""
+                body, titulo = "", ""
             page.close()
             if blocked:
                 print(f"[Amazon] captcha em '{keyword}'")
@@ -90,7 +91,7 @@ def search_amazon(keyword: str, min_discount: int):
                 print(f"[Amazon] timeout em '{keyword}', tentando de novo")
                 time.sleep(3)
                 continue
-            print(f"[Amazon] timeout em '{keyword}'")
+            print(f"[Amazon] timeout em '{keyword}' (página: '{titulo}'; texto: '{' '.join(body.split())[:90]}')")
             return []
         break
     if not loaded:

@@ -60,3 +60,10 @@ $('paste-btn').onclick=async()=>{try{const text=await navigator.clipboard.readTe
 
 $('coupon-box').addEventListener('toggle',()=>{if($('coupon-box').open)couponFillLast();updateCoupon(true)});
 $('coupon-clear').addEventListener('click',()=>{couponClear();updateCoupon(true)});
+
+// "Autorizar monitoramento": usa a mesma sugestão do "Preencher pelo link" (marca + até 3 termos específicos).
+// Antes, todas as palavras do título viravam termo obrigatório e a busca quase nunca achava a mini.
+$('monitor-link').addEventListener('click',async e=>{e.preventDefault();const d=formDeal();
+ try{const r=await fetch('/api/monitored/sugestao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal:d})});const g=await r.json();if(!r.ok)throw new Error(g.error);
+  location.href='/monitored?'+new URLSearchParams({name:g.name||d.title,search_terms:g.search_terms,required_terms:g.required_terms,max_price:'',observed_price:d.price||'',product_id:d.id,store:d.store,url:d.url,image:d.image||''})}
+ catch(_){location.href=$('monitor-link').href}});
