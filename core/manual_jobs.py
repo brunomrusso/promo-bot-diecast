@@ -583,35 +583,45 @@ def _extract_link_browser(url):
 
 
 def normalize_manual_coupon(deal):
-    code = str(deal.get("manual_coupon_code", "")).strip().upper()
-    if not code:
+    """Cupom do anúncio: nenhum campo é obrigatório.
+    - só o código: o texto mostra o cupom, sem "preço com cupom";
+    - desconto (com ou sem código): calcula o preço final (ou usa o final que você confirmou);
+    - só o preço final: mostra "com cupom" sem código (cupom para ativar na página do produto).
+    Regras informadas que não batem (compra mínima maior que o preço, final >= preço) continuam bloqueando."""
+    code = str(deal.get("manual_coupon_code", "") or "").strip().upper()
+    value = float(deal.get("manual_coupon_value") or 0)
+    final_in = float(deal.get("manual_coupon_final_price") or 0)
+    if not code and value <= 0 and final_in <= 0:
         for key in list(deal):
             if key.startswith("manual_coupon_"):
                 deal.pop(key, None)
         return deal
     price = float(deal.get("price") or 0)
-    kind = deal.get("manual_coupon_type", "fixed")
-    value = float(deal.get("manual_coupon_value") or 0)
+    kind = deal.get("manual_coupon_type", "fixed") or "fixed"
     minimum = float(deal.get("manual_coupon_min_purchase") or 0)
     cap = float(deal.get("manual_coupon_max_discount") or 0)
-    if price <= 0 or value <= 0:
-        raise ValueError("Cupom informado sem preço ou desconto válido")
-    if minimum and price < minimum:
-        raise ValueError("O produto não atinge a compra mínima do cupom")
-    discount = price * value / 100 if kind == "percent" else value
-    if cap:
-        discount = min(discount, cap)
-    suggested = max(0, price - discount)
-    final = float(deal.get("manual_coupon_final_price") or suggested)
-    if final <= 0 or final >= price:
-        raise ValueError("O preço final com cupom deve ser menor que o preço atual")
+    final = 0.0
+    if value > 0 or final_in > 0:
+        if price <= 0:
+            raise ValueError("Informe o preço do produto para calcular o cupom")
+        if minimum and price < minimum:
+            raise ValueError("O produto não atinge a compra mínima do cupom")
+        if value > 0:
+            discount = price * value / 100 if kind == "percent" else value
+            if cap:
+                discount = min(discount, cap)
+            final = final_in or max(0, price - discount)
+        else:
+            final = final_in
+        if final <= 0 or final >= price:
+            raise ValueError("O preço final com cupom deve ser menor que o preço atual")
     deal.update({
         "manual_coupon_code": code,
         "manual_coupon_type": kind,
         "manual_coupon_value": value,
         "manual_coupon_min_purchase": minimum,
         "manual_coupon_max_discount": cap,
-        "manual_coupon_final_price": final,
+        "manual_coupon_final_price": round(final, 2),
     })
     return deal
 

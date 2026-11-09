@@ -230,6 +230,8 @@ def api_schedule_post():
         return jsonify({"error": "Data inválida"}), 400
     if utc <= datetime.utcnow():
         return jsonify({"error": "Escolha um horário futuro"}), 400
+    if not data.get("pending_id"):
+        _lembrar_cupom(deal)
     item_id = db.schedule_post(deal, utc.isoformat(sep=" ", timespec="seconds"))
     if data.get("pending_id"):
         db.set_status(data["pending_id"], "scheduled")
@@ -247,7 +249,16 @@ def cancel_publication(item_id):
 @app.route("/manual")
 @login_required
 def manual():
-    return render_template("manual.html")
+    return render_template("manual.html", ultimo_cupom=db.get_setting("ultimo_cupom_manual", {}) or {})
+
+
+def _lembrar_cupom(deal):
+    """Guarda o último cupom usado no Criar anúncio (vale para o próximo anúncio, em qualquer aparelho)."""
+    if not isinstance(deal, dict):
+        return
+    c = {k: deal.get(f"manual_coupon_{k}") for k in ("code", "type", "value", "max_discount", "min_purchase")}
+    if (c["code"] or "").strip() or float(c["value"] or 0) > 0:
+        db.set_setting("ultimo_cupom_manual", {k: v for k, v in c.items() if v not in (None, "")})
 
 
 @app.get("/cupom-relampago")
@@ -397,6 +408,7 @@ def manual_share():
     text = text or format_whatsapp(deal, link)
     if len(text) > 20000 or link not in text:
         return jsonify({"error": "O texto para WhatsApp precisa conter o link monetizado validado"}), 400
+    _lembrar_cupom(deal)
     return jsonify({"whatsapp": text, "affiliate_url": link})
 
 
@@ -607,6 +619,7 @@ def api_publish():
         if field in deal:
             deal[field] = float(deal.get(field) or 0)
     deal["discount"] = int(deal["discount"])
+    _lembrar_cupom(deal)
     return jsonify({"job_id": db.create_job("publish", {"deal": deal})})
 
 

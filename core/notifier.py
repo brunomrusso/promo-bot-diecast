@@ -36,10 +36,13 @@ def _format(deal: dict, link: str) -> str:
                  f"Por: <b>R$ {deal['price']:.2f}</b>\n\n")
     elif deal.get("price"):
         text += f"Por: <b>R$ {deal['price']:.2f}</b>\n\n"
-    if deal.get("manual_coupon_code") and deal.get("manual_coupon_final_price"):
-        code = html.escape(deal["manual_coupon_code"])
-        text += (f"🎟️ Cupom: <code>{code}</code>\n"
-                 f"Com cupom: <b>R$ {deal['manual_coupon_final_price']:.2f}</b>\n")
+    if deal.get("manual_coupon_code") or deal.get("manual_coupon_final_price"):
+        if deal.get("manual_coupon_code"):
+            text += f"🎟️ Cupom: <code>{html.escape(deal['manual_coupon_code'])}</code>\n"
+        else:
+            text += "🎟️ Ative o cupom na página do produto\n"
+        if deal.get("manual_coupon_final_price"):
+            text += f"Com cupom: <b>R$ {deal['manual_coupon_final_price']:.2f}</b>\n"
         if deal.get("manual_coupon_min_purchase"):
             text += f"Compra mínima: R$ {deal['manual_coupon_min_purchase']:.2f}\n"
         text += "\n"
@@ -108,9 +111,11 @@ def format_whatsapp(deal: dict, link: str) -> str:
                      f"Por: *R$ {deal['price']:.2f}*\n\n")
         elif deal.get("price"):
             text += f"Por: *R$ {deal['price']:.2f}*\n\n"
-        if deal.get("manual_coupon_code") and deal.get("manual_coupon_final_price"):
-            text += (f"🎟️ Cupom: *{deal['manual_coupon_code']}*\n"
-                     f"Com cupom: *R$ {deal['manual_coupon_final_price']:.2f}*\n")
+        if deal.get("manual_coupon_code") or deal.get("manual_coupon_final_price"):
+            text += (f"🎟️ Cupom: *{deal['manual_coupon_code']}*\n" if deal.get("manual_coupon_code")
+                     else "🎟️ Ative o cupom na página do produto\n")
+            if deal.get("manual_coupon_final_price"):
+                text += f"Com cupom: *R$ {deal['manual_coupon_final_price']:.2f}*\n"
             if deal.get("manual_coupon_min_purchase"):
                 text += f"Compra mínima: R$ {deal['manual_coupon_min_purchase']:.2f}\n"
             text += "\n"

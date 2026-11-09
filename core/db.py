@@ -1009,6 +1009,21 @@ def reconcile_catalog_queue():
     return archived
 
 
+def frozen_monitored_items(hours):
+    """Minis "congeladas": foram para aprovação (ou tiveram decisão: publicada/ignorada) nas últimas N horas.
+    Enquanto congeladas, o bot não busca os termos delas nem manda nova oportunidade."""
+    if not hours or hours <= 0:
+        return set()
+    janela = f"-{int(hours)} hours"
+    with _conn() as conn:
+        a = {r[0] for r in conn.execute(
+            "SELECT monitored_item_id FROM catalog_opportunities WHERE last_notified_at>=datetime('now',?)", (janela,))}
+        b = {r[0] for r in conn.execute(
+            "SELECT monitored_item_id FROM posted WHERE monitored_item_id IS NOT NULL AND ("
+            "posted_at>=datetime('now',?) OR decided_at>=datetime('now',?))", (janela, janela))}
+    return {i for i in a | b if i is not None}
+
+
 def enqueue_catalog_opportunity(item_id, deal):
     from core.filters import identifies_monitored
     item = get_monitored_item(item_id)

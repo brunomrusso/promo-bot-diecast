@@ -35,7 +35,8 @@ def _check_deals():
     manual_jobs.process_jobs()
     manual_jobs.process_scheduled()
     archived = db.reconcile_catalog_queue()
-    monitored = db.active_monitored_items()
+    congeladas = db.frozen_monitored_items(config.tempos()["congelar_horas"])
+    monitored = [i for i in db.active_monitored_items() if i["id"] not in congeladas]
     terms = list(dict.fromkeys(
         query for item in monitored
         for query in filters.search_queries(item["search_terms"])))
@@ -61,7 +62,7 @@ def _check_deals():
             db.set_system_state("heartbeat", {"phase": "searching", "store": store_name, "keyword": keyword})
             manual_jobs.process_jobs()
             manual_jobs.process_scheduled()
-            current_items = db.active_monitored_items()
+            current_items = [i for i in db.active_monitored_items() if i["id"] not in congeladas]
             if not any(keyword in filters.search_queries(item["search_terms"])
                        for item in current_items):
                 continue
@@ -77,7 +78,7 @@ def _check_deals():
                 break
             manual_jobs.process_jobs(urgent_only=True)
             time.sleep(random.uniform(2, 5))  # evita rate limit/captcha
-            current_items = db.active_monitored_items()
+            current_items = [i for i in db.active_monitored_items() if i["id"] not in congeladas]
             for deal in deals:
                 if deal.get("origin") == "international" or not deal.get("price"):
                     continue
@@ -90,7 +91,10 @@ def _check_deals():
                     candidates.setdefault(item["id"], {})[deal["id"]] = deal
         db.update_store_health(store_name, "degraded" if store_errors else "healthy",
                                store_offers, time.time() - store_started, " | ".join(store_errors))
+    congeladas |= db.frozen_monitored_items(config.tempos()["congelar_horas"])
     for item in db.active_monitored_items():
+        if item["id"] in congeladas:
+            continue
         offers = list(candidates.get(item["id"], {}).values())
         if not offers or new_opportunities >= 5:
             continue

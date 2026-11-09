@@ -234,6 +234,34 @@ class ExpiryAndQuietTests(unittest.TestCase):
             self.assertEqual(affiliate.ml_site_link(url, insistir=True), "https://meli.la/abc")
         self.assertNotIn(url, db.get_setting(affiliate.ML_LINK_FALHAS_KEY, {}))
 
+    def test_mini_congelada_nao_volta_para_aprovacao(self):
+        item = db.save_monitored_item(dict(name="Honda Del Sol", search_terms="del sol", required_terms="del sol", max_price=43))
+        self.assertEqual(db.frozen_monitored_items(24), set())
+        self.assertTrue(db.enqueue_catalog_opportunity(item, self._deal()))
+        self.assertEqual(db.frozen_monitored_items(24), {item})  # acabou de ir para aprovação
+        self.assertEqual(db.frozen_monitored_items(0), set())    # 0 desliga
+        with db._conn() as c:
+            c.execute("UPDATE posted SET posted_at=datetime('now','-30 hours')")
+            c.execute("UPDATE catalog_opportunities SET last_notified_at=datetime('now','-30 hours')")
+        self.assertEqual(db.frozen_monitored_items(24), set())   # passou o tempo: volta para o fim da fila
+        db.set_status("ml-MLB1", "rejected")                      # decisão (ignorada) recomeça o congelamento
+        self.assertEqual(db.frozen_monitored_items(24), {item})
+
+    def test_cupom_sem_campos_obrigatorios(self):
+        from core.manual_jobs import normalize_manual_coupon
+        base = dict(id="x", store="Mercado Livre", title="T", price=100.0)
+        self.assertNotIn("manual_coupon_code", normalize_manual_coupon(dict(base, manual_coupon_code="", manual_coupon_type="fixed")))
+        so_codigo = normalize_manual_coupon(dict(base, manual_coupon_code="promo10"))
+        self.assertEqual((so_codigo["manual_coupon_code"], so_codigo["manual_coupon_final_price"]), ("PROMO10", 0))
+        pct = normalize_manual_coupon(dict(base, manual_coupon_code="", manual_coupon_type="percent", manual_coupon_value=10))
+        self.assertEqual((pct["manual_coupon_code"], pct["manual_coupon_final_price"]), ("", 90.0))
+        with self.assertRaises(ValueError):
+            normalize_manual_coupon(dict(base, manual_coupon_code="X", manual_coupon_value=10, manual_coupon_min_purchase=150))
+        from core.notifier import format_whatsapp
+        self.assertIn("Cupom: *PROMO10*", format_whatsapp(so_codigo, "https://meli.la/x"))
+        self.assertNotIn("Com cupom", format_whatsapp(so_codigo, "https://meli.la/x"))
+        self.assertIn("Ative o cupom na página", format_whatsapp(pct, "https://meli.la/x"))
+
 
 if __name__ == "__main__":
     unittest.main()

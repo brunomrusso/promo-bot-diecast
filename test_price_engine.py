@@ -46,7 +46,7 @@ class PriceEngineTests(unittest.TestCase):
             self.assertTrue(scrapers.navegador_ml_liberado())
         db.set_setting("tempos_busca", {"ciclo_min": 2, "termos_por_ciclo": 5, "ml_navegador_min": 30})
         config.clear_dynamic_cache()
-        self.assertEqual(config.tempos(), {"ciclo_min": 5, "termos_por_ciclo": 5, "ml_navegador_min": 30})  # 2 -> mínimo 5
+        self.assertEqual(config.tempos(), {"ciclo_min": 5, "termos_por_ciclo": 5, "ml_navegador_min": 30, "congelar_horas": 24})  # 2 -> mínimo 5; congelar não salvo -> padrão
         config.clear_dynamic_cache()
 
     def tearDown(self):

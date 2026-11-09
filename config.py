@@ -76,8 +76,9 @@ def ml_playwright_proxy():
     return proxy
 
 
-TEMPOS_PADRAO = {"ciclo_min": 15, "termos_por_ciclo": 3, "ml_navegador_min": 60}
-TEMPOS_LIMITES = {"ciclo_min": (5, 120), "termos_por_ciclo": (1, 20), "ml_navegador_min": (15, 1440)}
+TEMPOS_PADRAO = {"ciclo_min": 15, "termos_por_ciclo": 3, "ml_navegador_min": 60, "congelar_horas": 24}
+TEMPOS_LIMITES = {"ciclo_min": (5, 120), "termos_por_ciclo": (1, 20), "ml_navegador_min": (15, 1440),
+                  "congelar_horas": (0, 720)}
 
 
 def tempos():
@@ -88,7 +89,7 @@ def tempos():
     out = {}
     for k, padrao in base.items():
         try:
-            v = int(salvo.get(k) or padrao)
+            v = int(salvo[k]) if salvo.get(k) not in (None, "") else padrao  # 0 é valor válido (desliga)
         except (TypeError, ValueError):
             v = padrao
         lo, hi = TEMPOS_LIMITES[k]
