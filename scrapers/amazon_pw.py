@@ -22,7 +22,21 @@ def _get_context():
         except Exception:
             _browser = _pw.chromium.launch(headless=False, args=_args)
         _ctx = _browser.new_context(locale="pt-BR")
+        _aquece(_ctx)
     return _ctx
+
+
+def _aquece(ctx):
+    """Abre a página inicial antes da primeira busca: sem os cookies de sessão da Amazon, a busca (/s?k=)
+    costuma voltar a página "Algo deu errado" (visto no log em 09/11)."""
+    page = ctx.new_page()
+    try:
+        page.goto("https://www.amazon.com.br/", timeout=45000, wait_until="domcontentloaded")
+        page.wait_for_timeout(2500)
+    except Exception as exc:
+        print(f"[Amazon] não consegui abrir a página inicial: {str(exc)[:120]}")
+    finally:
+        page.close()
 
 
 def close_context():
@@ -88,7 +102,9 @@ def search_amazon(keyword: str, min_discount: int):
                 print(f"[Amazon] sem resultados para '{keyword}'")
                 return []
             if attempt == 0:
-                print(f"[Amazon] timeout em '{keyword}', tentando de novo")
+                print(f"[Amazon] timeout em '{keyword}' (página: '{titulo}'), tentando de novo")
+                if "algo deu errado" in titulo.lower() or "something went wrong" in titulo.lower():
+                    _aquece(ctx)  # renova os cookies de sessão antes de tentar de novo
                 time.sleep(3)
                 continue
             print(f"[Amazon] timeout em '{keyword}' (página: '{titulo}'; texto: '{' '.join(body.split())[:90]}')")
