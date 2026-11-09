@@ -198,7 +198,7 @@ O bot é projetado para rodar 24h em uma VM gratuita da Oracle Cloud. Consulte o
 
 Resumo:
 1. Crie uma VM **VM.Standard.E2.1.Micro** (Always Free, AMD x86)
-2. Envie o código e execute `deploy/setup.sh`
+2. Envie o código e execute `deploy/scripts/setup.sh`
 3. Configure o Cloudflare Tunnel para acesso externo ao painel
 4. Ative os serviços: `promobot`, `dashboard`, `dashboard-tunnel`
 

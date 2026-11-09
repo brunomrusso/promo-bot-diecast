@@ -8,7 +8,7 @@ set "NEWKEY=C:\Users\bruno\Downloads\ssh-key-2026-11-05.key"
 set "NEWIP=187.41.122.7"
 cd /d "%~dp0.."
 echo ===== PASSO 1: preparando a VPS nova (usuario, pacotes, Chrome)
-scp -i "%NEWKEY%" deploy\migrar-vps-1-root.sh root@%NEWIP%:/root/
+scp -i "%NEWKEY%" deploy\scripts\migrar-vps-1-root.sh root@%NEWIP%:/root/
 if errorlevel 1 goto erro
 ssh -i "%NEWKEY%" root@%NEWIP% "bash /root/migrar-vps-1-root.sh"
 if errorlevel 1 goto erro
@@ -20,7 +20,7 @@ scp -i "%OLDKEY%" %OLD%:/tmp/promobot-migr.tgz "%TEMP%\promobot-migr.tgz"
 if errorlevel 1 goto erro_antiga
 scp -i "%NEWKEY%" "%TEMP%\promobot-migr.tgz" ubuntu@%NEWIP%:/home/ubuntu/
 if errorlevel 1 goto erro_antiga
-scp -i "%NEWKEY%" deploy\migrar-vps-2-ubuntu.sh ubuntu@%NEWIP%:/home/ubuntu/
+scp -i "%NEWKEY%" deploy\scripts\migrar-vps-2-ubuntu.sh ubuntu@%NEWIP%:/home/ubuntu/
 if errorlevel 1 goto erro_antiga
 echo ===== PASSO 4: instalando e ligando o bot na VPS nova (5-10 min)
 ssh -i "%NEWKEY%" ubuntu@%NEWIP% "tar xzf ~/promobot-migr.tgz -C ~ && bash ~/migrar-vps-2-ubuntu.sh"

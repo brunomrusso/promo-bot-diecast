@@ -70,7 +70,7 @@ ssh -i $NEW_KEY ubuntu@$NEW_IP "mkdir -p promo-bot-carros && cd promo-bot-carros
 ```bash
 ssh -i $NEW_KEY ubuntu@$NEW_IP
 cd promo-bot-carros
-bash deploy/migrate-to-arm.sh
+bash deploy/scripts/migrate-to-arm.sh
 ```
 
 O script instala tudo automaticamente: Python, Playwright (Chromium ARM64), Cloudflare Tunnel, serviços systemd.

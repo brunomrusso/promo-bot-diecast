@@ -107,6 +107,24 @@ class SiteExportTests(unittest.TestCase):
             self.assertEqual(sent["itens"][0]["id"], "ach-ml-NEW")
         self.assertEqual(db.get_system_state()["site_export"]["value"]["status"], "ok")
 
+    @patch("core.site_export._upload")
+    @patch("core.site_export._fetch_current")
+    @patch("core.site_export.build_app_items")
+    def test_so_a_hora_da_consulta_mudou_nao_envia(self, build, fetch, upload):
+        from datetime import datetime, timedelta
+        agora = datetime.now(site_export.ZONE).replace(tzinfo=None)
+        f = lambda dt: dt.strftime("%Y-%m-%dT%H:%M")
+        build.return_value = ([{"id": "ach-ml-1", "origem": "app", "preco": 50.0, "preco_consultado_em": f(agora)}], [])
+        fetch.return_value = {"itens": [{"id": "ach-ml-1", "origem": "app", "preco": 50.0, "preco_consultado_em": f(agora - timedelta(minutes=15))}]}
+        with patch("config.SITE_FTP_HOST", "ftp.x"), patch("config.SITE_FTP_USER", "u"):
+            self.assertFalse(site_export.publish()["changed"])  # só a hora mudou: não envia
+            upload.assert_not_called()
+            fetch.return_value["itens"][0]["preco_consultado_em"] = f(agora - timedelta(hours=7))
+            self.assertTrue(site_export.publish()["changed"])   # hora do site ficou velha: reenvia
+            fetch.return_value["itens"][0]["preco_consultado_em"] = f(agora - timedelta(minutes=15))
+            build.return_value[0][0]["preco"] = 45.0
+            self.assertTrue(site_export.publish()["changed"])   # preço mudou: envia
+
     def test_publish_disabled_without_ftp(self):
         with patch("config.SITE_FTP_HOST", ""):
             self.assertEqual(site_export.publish()["status"], "disabled")

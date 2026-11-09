@@ -120,8 +120,28 @@ def merge(current, app_items):
     return {"atualizado_em": _today(), "itens": kept + app_items}
 
 
+REFRESH_HORAS = 6  # mesmo sem mudança, reenvia a cada 6 h para o site mostrar "preço conferido" recente
+
+
 def _comparable(data):
-    return json.dumps(data.get("itens", []), ensure_ascii=False, sort_keys=True)
+    """Conteúdo que importa: ignora a hora da consulta (mudava a cada ciclo e forçava envio por FTP à toa)."""
+    itens = [{k: v for k, v in i.items() if k != "preco_consultado_em"} for i in data.get("itens", [])]
+    return json.dumps(itens, ensure_ascii=False, sort_keys=True)
+
+
+def _consulta_velha(data, agora=None):
+    """True se algum achadinho do app no site tem a hora da consulta com mais de REFRESH_HORAS."""
+    agora = agora or datetime.now(ZONE).replace(tzinfo=None)
+    for i in data.get("itens", []):
+        q = i.get("preco_consultado_em")
+        if i.get("origem") != "app" or not q:
+            continue
+        try:
+            if (agora - datetime.fromisoformat(str(q)[:16])).total_seconds() > REFRESH_HORAS * 3600:
+                return True
+        except ValueError:
+            return True
+    return False
 
 
 def _upload(content: bytes, filename: str = "achadinhos.json"):
@@ -148,7 +168,7 @@ def publish(force=False, generate_links=True):
         app_items, skipped = build_app_items(generate_links)
         current = _fetch_current()
         merged = merge(current, app_items)
-        changed = force or _comparable(merged) != _comparable(current)
+        changed = force or _comparable(merged) != _comparable(current) or _consulta_velha(current)
         if changed:
             _upload(json.dumps(merged, ensure_ascii=False, indent=2).encode("utf-8"))
         result = {"status": "ok", "changed": changed, "app_items": len(app_items),

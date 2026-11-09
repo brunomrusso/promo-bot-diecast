@@ -44,7 +44,7 @@ echo "   backup em $B/arquivos.tgz"
 
 echo "== 3/6 extraindo código novo"
 tar xzf "$PKG"
-sed -i 's/\r$//' core/site_export.py test_site_export.py deploy/aplicar-atualizacao-site.sh 2>/dev/null || true
+sed -i 's/\r$//' core/site_export.py test_site_export.py deploy/scripts/aplicar-atualizacao-site.sh 2>/dev/null || true
 
 echo "== 4/6 configurando o FTP do site no .env"
 sed -i 's/\r$//' "$SITE_ENV"

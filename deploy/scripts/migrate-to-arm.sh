@@ -1,7 +1,7 @@
 #!/bin/bash
 # Migração da VM E2.1.Micro (AMD) para A1.Flex (ARM)
 # Uso: executar na VM NOVA (ARM) depois de copiar o projeto
-# bash deploy/migrate-to-arm.sh
+# bash deploy/scripts/migrate-to-arm.sh
 set -e
 
 echo "=== Migração para ARM64 ==="

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Setup do promo-bot numa VM Ubuntu 22.04/24.04 (Oracle Free Tier, etc.)
-# Uso: bash deploy/setup.sh
+# Uso: bash deploy/scripts/setup.sh
 set -e
 
 sudo apt-get update

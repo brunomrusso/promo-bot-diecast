@@ -10,7 +10,7 @@ cd /d "%SITE%" || goto erro
 tar -czf "%TEMP%\site-upload.tgz" %ARQUIVOS%
 if errorlevel 1 goto erro
 cd /d "%~dp0.."
-scp -q -i "%KEY%" "%TEMP%\site-upload.tgz" deploy\publicar-site.sh %SERVER%:~/
+scp -q -i "%KEY%" "%TEMP%\site-upload.tgz" deploy\scripts\publicar-site.sh %SERVER%:~/
 if errorlevel 1 goto erro
 ssh -i "%KEY%" %SERVER% "bash ~/publicar-site.sh"
 if errorlevel 1 goto erro

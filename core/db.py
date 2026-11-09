@@ -1009,19 +1009,24 @@ def reconcile_catalog_queue():
     return archived
 
 
-def frozen_monitored_items(hours):
-    """Minis "congeladas": foram para aprovação (ou tiveram decisão: publicada/ignorada) nas últimas N horas.
-    Enquanto congeladas, o bot não busca os termos delas nem manda nova oportunidade."""
+def frozen_until(hours):
+    """{id da mini: até quando (UTC, 'AAAA-MM-DD HH:MM:SS')} das minis congeladas: foram para aprovação
+    (ou tiveram decisão: publicada/ignorada) nas últimas N horas. Congeladas: o bot não busca nem reenvia."""
     if not hours or hours <= 0:
-        return set()
-    janela = f"-{int(hours)} hours"
+        return {}
+    janela, soma = f"-{int(hours)} hours", f"+{int(hours)} hours"
     with _conn() as conn:
-        a = {r[0] for r in conn.execute(
-            "SELECT monitored_item_id FROM catalog_opportunities WHERE last_notified_at>=datetime('now',?)", (janela,))}
-        b = {r[0] for r in conn.execute(
-            "SELECT monitored_item_id FROM posted WHERE monitored_item_id IS NOT NULL AND ("
-            "posted_at>=datetime('now',?) OR decided_at>=datetime('now',?))", (janela, janela))}
-    return {i for i in a | b if i is not None}
+        rows = conn.execute(
+            "SELECT id, datetime(MAX(t), ?) FROM ("
+            " SELECT monitored_item_id AS id, last_notified_at AS t FROM catalog_opportunities"
+            " UNION ALL SELECT monitored_item_id, posted_at FROM posted WHERE monitored_item_id IS NOT NULL"
+            " UNION ALL SELECT monitored_item_id, decided_at FROM posted WHERE monitored_item_id IS NOT NULL AND decided_at IS NOT NULL"
+            ") WHERE id IS NOT NULL AND t>=datetime('now',?) GROUP BY id", (soma, janela)).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def frozen_monitored_items(hours):
+    return set(frozen_until(hours))
 
 
 def enqueue_catalog_opportunity(item_id, deal):

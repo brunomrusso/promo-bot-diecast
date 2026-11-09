@@ -33,7 +33,7 @@ ssh -i ~/Downloads/sua-chave.key ubuntu@IP_DA_VM
 mkdir promo-bot-carros && cd promo-bot-carros
 tar -xzf ~/promobot.tgz
 mv ~/.env .
-bash deploy/setup.sh
+bash deploy/scripts/setup.sh
 ```
 
 ## 3. Login do Mercado Livre (via VNC, assistente incluído)
@@ -42,7 +42,7 @@ O perfil do Chrome do Windows **não** funciona no Linux (cookies são
 criptografados por SO) — precisa logar de novo, só uma vez.
 
 **Caminho recomendado (Windows):** execute `deploy\abrir-login-ml.cmd`.
-Ele abre o túnel SSH, inicia `deploy/ml-login.sh` no servidor e conecta o
+Ele abre o túnel SSH, inicia `deploy/scripts/ml-login.sh` no servidor e conecta o
 TightVNC automaticamente. O script:
 
 1. Marca `ml_maintenance` no estado do sistema e **para o bot**

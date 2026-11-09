@@ -784,6 +784,13 @@ def monitored():
         return redirect(url_for("monitored"))
     db.migrate_legacy_price_alerts()
     items = db.list_monitored_items()
+    congeladas = db.frozen_until(config.tempos()["congelar_horas"])
+    agora_local = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    for i in items:
+        ate = congeladas.get(i["id"])
+        if ate:
+            local = datetime.fromisoformat(ate).replace(tzinfo=timezone.utc).astimezone(ZoneInfo("America/Sao_Paulo"))
+            i["congelada_ate"] = local.strftime("%H:%M") if local.date() == agora_local.date() else local.strftime("%d/%m %H:%M")
     tags = db.monitored_tags()
     selected_tag = " ".join(request.args.get("tag", "").split()).casefold()
     if selected_tag:

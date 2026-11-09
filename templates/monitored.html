@@ -54,6 +54,7 @@
           <div class="deal-badges">
             <span class="monitored-state {{ {'target_hit':'hit','paused':'paused','learning':'learning'}.get(item.state,'active') }}">{{ {'target_hit':'Alvo atingido','watching':'Com alvo','learning':'Aprendendo','paused':'Pausada'}[item.state] }}</span>
             {% if item.is_opportunity %}<span class="quality-badge quality-record">Oportunidade</span>{% endif %}
+            {% if item.congelada_ate %}<span class="quality-badge mini-frozen" title="Foi para aprovação (ou você publicou/ignorou) há pouco: o bot não busca nem reenvia esta mini até lá. Tempo em Configurações > Tempos de busca.">❄ Congelada até {{ item.congelada_ate }}</span>{% endif %}
             {% if item.trend == 'down' %}<span class="quality-badge quality-excellent">↓ {{ item.trend_pct }}%</span>{% elif item.trend == 'up' %}<span class="quality-badge quality-expensive">↑ +{{ item.trend_pct }}%</span>{% elif item.trend == 'stable' %}<span class="quality-badge quality-normal">→ estável</span>{% endif %}
           </div>
           <details class="monitored-menu">
